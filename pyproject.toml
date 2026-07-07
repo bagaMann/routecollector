@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "routecollector"
+version = "0.1.0"
+description = "Dynamic BGP Route Collector"
+readme = "README.md"
+requires-python = ">=3.11"
+
+dependencies = [
+    "PyYAML>=6.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff"
+]
+
+[project.scripts]
+routecollector = "routecollector.cli:main"
