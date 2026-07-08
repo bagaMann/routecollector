@@ -10,6 +10,7 @@ from pathlib import Path
 from routecollector import __version__
 from routecollector.core.application import Application
 from routecollector.core.version import get_version
+from routecollector.exporter.bird import BirdExporter
 from routecollector.parser.service_config import ServiceConfigSync
 from routecollector.planner.planner import RoutePlanner
 from routecollector.resolver.resolver import DnsResolver
@@ -17,6 +18,7 @@ from routecollector.resolver.resolver import DnsResolver
 
 DEFAULT_CONFIG = Path("config/config.yaml")
 DEFAULT_SERVICES_DIR = Path("config/services")
+DEFAULT_BIRD_OUTPUT = Path("bird/routecollector.conf")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     resolve_parser.add_argument("service", nargs="?", default=None)
 
     subparsers.add_parser("plan", help="Build route plan from observations")
+    subparsers.add_parser("export", help="Export route plan to BIRD config file")
 
     return parser
 
@@ -149,6 +152,28 @@ def command_plan(config_path: Path) -> int:
     return 0
 
 
+def command_export(config_path: Path) -> int:
+    """Export route plan to BIRD config file."""
+
+    app = Application(config_path)
+    app.initialize()
+
+    if app.repository is None:
+        raise RuntimeError("Repository is not initialized")
+
+    planner = RoutePlanner(app.repository)
+    routes = planner.build_plan()
+
+    exporter = BirdExporter(DEFAULT_BIRD_OUTPUT)
+    output_file = exporter.export(routes)
+
+    print("BIRD config exported")
+    print(f"File: {output_file}")
+    print(f"Prefixes: {len(routes)}")
+
+    return 0
+
+
 def main() -> int:
     """CLI entrypoint."""
 
@@ -172,6 +197,9 @@ def main() -> int:
 
     if args.command == "plan":
         return command_plan(args.config)
+
+    if args.command == "export":
+        return command_export(args.config)
 
     parser.print_help()
     return 0
