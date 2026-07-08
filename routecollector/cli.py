@@ -11,6 +11,7 @@ from routecollector import __version__
 from routecollector.core.application import Application
 from routecollector.core.version import get_version
 from routecollector.exporter.bird import BirdExporter
+from routecollector.exporter.birdctl import BirdControl
 from routecollector.parser.service_config import ServiceConfigSync
 from routecollector.planner.planner import RoutePlanner
 from routecollector.resolver.resolver import DnsResolver
@@ -49,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("plan", help="Build route plan from observations")
     subparsers.add_parser("export", help="Export route plan to BIRD config file")
+    subparsers.add_parser("bird-check", help="Check BIRD configuration")
 
     return parser
 
@@ -174,6 +176,15 @@ def command_export(config_path: Path) -> int:
     return 0
 
 
+def command_bird_check() -> int:
+    """Check BIRD configuration."""
+
+    output = BirdControl().configure_check()
+
+    print(output)
+    return 0
+
+
 def main() -> int:
     """CLI entrypoint."""
 
@@ -200,6 +211,9 @@ def main() -> int:
 
     if args.command == "export":
         return command_export(args.config)
+
+    if args.command == "bird-check":
+        return command_bird_check()
 
     parser.print_help()
     return 0
