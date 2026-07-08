@@ -11,6 +11,7 @@ from routecollector import __version__
 from routecollector.core.application import Application
 from routecollector.core.version import get_version
 from routecollector.parser.service_config import ServiceConfigSync
+from routecollector.resolver.resolver import DnsResolver
 
 
 DEFAULT_CONFIG = Path("config/config.yaml")
@@ -39,6 +40,14 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("status", help="Show application status")
     subparsers.add_parser("init", help="Initialize RouteCollector state")
     subparsers.add_parser("sync", help="Sync service configuration into database")
+
+    resolve_parser = subparsers.add_parser("resolve", help="Resolve configured domains")
+    resolve_parser.add_argument(
+        "service",
+        nargs="?",
+        default=None,
+        help="Optional service name",
+    )
 
     return parser
 
@@ -101,6 +110,25 @@ def command_sync(config_path: Path) -> int:
     return 0
 
 
+def command_resolve(config_path: Path, service_name: str | None) -> int:
+    """Resolve configured domains."""
+
+    app = Application(config_path)
+    app.initialize()
+
+    if app.repository is None:
+        raise RuntimeError("Repository is not initialized")
+
+    resolver = DnsResolver(app.repository)
+    domains, observations = resolver.resolve_all(service_name)
+
+    print("DNS resolve completed")
+    print(f"Domains: {domains}")
+    print(f"Observations: {observations}")
+
+    return 0
+
+
 def main() -> int:
     """CLI entrypoint."""
 
@@ -118,6 +146,9 @@ def main() -> int:
 
     if args.command == "sync":
         return command_sync(args.config)
+
+    if args.command == "resolve":
+        return command_resolve(args.config, args.service)
 
     parser.print_help()
     return 0

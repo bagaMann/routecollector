@@ -30,6 +30,20 @@ class Domain:
     active: bool
 
 
+@dataclass(slots=True, frozen=True)
+class Observation:
+    """DNS observation model."""
+
+    id: int
+    domain_id: int | None
+    ip: str
+    source: str
+    dns_server: str | None
+    hits: int
+    ttl: int | None
+    confidence: int
+
+
 class Repository:
     """Application repository."""
 
@@ -157,7 +171,7 @@ class Repository:
             return int(row["id"])
 
     def list_domains(self, service_name: str | None = None) -> list[Domain]:
-        """Return domains, optionally filtered by service name."""
+        """Return active domains, optionally filtered by service name."""
 
         with self._database.connection() as conn:
             if service_name is None:
@@ -165,6 +179,7 @@ class Repository:
                     """
                     SELECT id, service_id, domain, source, active
                     FROM domains
+                    WHERE active = 1
                     ORDER BY domain
                     """
                 ).fetchall()
@@ -174,7 +189,7 @@ class Repository:
                     SELECT d.id, d.service_id, d.domain, d.source, d.active
                     FROM domains d
                     JOIN services s ON s.id = d.service_id
-                    WHERE s.name = ?
+                    WHERE s.name = ? AND d.active = 1
                     ORDER BY d.domain
                     """,
                     (service_name,),
@@ -187,6 +202,87 @@ class Repository:
                     domain=str(row["domain"]),
                     source=str(row["source"]),
                     active=bool(row["active"]),
+                )
+                for row in rows
+            ]
+
+    def add_observation(
+        self,
+        domain_id: int | None,
+        ip: str,
+        source: str,
+        dns_server: str | None,
+        ttl: int | None,
+        confidence: int = 1,
+    ) -> int:
+        """Insert or update DNS observation."""
+
+        with self._database.connection() as conn:
+            existing = conn.execute(
+                """
+                SELECT id, hits, confidence
+                FROM observations
+                WHERE domain_id IS ? AND ip = ? AND source = ? AND dns_server IS ?
+                """,
+                (domain_id, ip, source, dns_server),
+            ).fetchone()
+
+            if existing is not None:
+                conn.execute(
+                    """
+                    UPDATE observations
+                    SET
+                        last_seen = CURRENT_TIMESTAMP,
+                        hits = hits + 1,
+                        ttl = ?,
+                        confidence = confidence + ?
+                    WHERE id = ?
+                    """,
+                    (ttl, confidence, int(existing["id"])),
+                )
+                return int(existing["id"])
+
+            cursor = conn.execute(
+                """
+                INSERT INTO observations
+                    (domain_id, ip, source, dns_server, ttl, confidence)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (domain_id, ip, source, dns_server, ttl, confidence),
+            )
+
+            return int(cursor.lastrowid)
+
+    def list_observations(self) -> list[Observation]:
+        """Return all observations."""
+
+        with self._database.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    id,
+                    domain_id,
+                    ip,
+                    source,
+                    dns_server,
+                    hits,
+                    ttl,
+                    confidence
+                FROM observations
+                ORDER BY last_seen DESC
+                """
+            ).fetchall()
+
+            return [
+                Observation(
+                    id=int(row["id"]),
+                    domain_id=row["domain_id"],
+                    ip=str(row["ip"]),
+                    source=str(row["source"]),
+                    dns_server=row["dns_server"],
+                    hits=int(row["hits"]),
+                    ttl=row["ttl"],
+                    confidence=int(row["confidence"]),
                 )
                 for row in rows
             ]
