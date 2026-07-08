@@ -12,6 +12,7 @@ from pathlib import Path
 from routecollector.core.config import Config, ConfigLoader
 from routecollector.core.database import Database
 from routecollector.core.logger import LoggerFactory
+from routecollector.core.repository import Repository
 
 
 class Application:
@@ -23,6 +24,7 @@ class Application:
         self.config: Config | None = None
         self.logger: logging.Logger | None = None
         self.database: Database | None = None
+        self.repository: Repository | None = None
 
     def initialize(self) -> None:
         """Initialize application without changing runtime state."""
@@ -35,7 +37,7 @@ class Application:
         ).create()
 
         self.database = Database(self.config.database.path)
-
+        self.repository = Repository(self.database)
         self.logger.info("Application initialized")
 
     def init_database(self) -> None:
@@ -58,6 +60,7 @@ class Application:
             self.config is not None
             and self.logger is not None
             and self.database is not None
+            and self.repository is not None
         )
 
     def status(self) -> dict[str, str]:
