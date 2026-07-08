@@ -33,15 +33,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser(
-        "version",
-        help="Show version information",
-    )
-
-    subparsers.add_parser(
-        "status",
-        help="Show application status",
-    )
+    subparsers.add_parser("version", help="Show version information")
+    subparsers.add_parser("status", help="Show application status")
+    subparsers.add_parser("init", help="Initialize RouteCollector state")
 
     return parser
 
@@ -73,6 +67,18 @@ def command_status(config_path: Path) -> int:
     return 0
 
 
+def command_init(config_path: Path) -> int:
+    """Initialize RouteCollector state."""
+
+    app = Application(config_path)
+    app.init_database()
+
+    print("RouteCollector initialized")
+    print(f"Database: {app.database.path if app.database else 'unknown'}")
+
+    return 0
+
+
 def main() -> int:
     """CLI entrypoint."""
 
@@ -84,6 +90,9 @@ def main() -> int:
 
     if args.command == "status":
         return command_status(args.config)
+
+    if args.command == "init":
+        return command_init(args.config)
 
     parser.print_help()
     return 0

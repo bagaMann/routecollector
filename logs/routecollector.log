@@ -1,3 +1,7 @@
 2026-07-08 10:56:38,108 | INFO     | routecollector | Hello RouteCollector
 2026-07-08 11:06:08,294 | INFO     | routecollector | Application initialized
 2026-07-08 14:35:52,637 | INFO     | routecollector | Application initialized
+2026-07-08 14:52:10,698 | INFO     | routecollector | Application initialized
+2026-07-08 14:52:20,776 | INFO     | routecollector | Application initialized
+2026-07-08 14:52:20,850 | INFO     | routecollector | Database initialized: state/state.db
+2026-07-08 14:52:29,990 | INFO     | routecollector | Application initialized
