@@ -1,0 +1,9 @@
+project:
+  name: RouteCollector
+  version: 0.1.0
+
+database:
+  path: state/state.db
+
+logging:
+  level: INFO
