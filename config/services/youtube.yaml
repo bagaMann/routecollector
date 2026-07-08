@@ -1,0 +1,19 @@
+name: youtube
+description: YouTube video platform
+enabled: true
+
+sources:
+  - manual
+
+domains:
+  - youtube.com
+  - youtu.be
+  - youtube-nocookie.com
+  - googlevideo.com
+  - ytimg.com
+  - ggpht.com
+  - youtubei.googleapis.com
+  - youtube.googleapis.com
+  - gvt1.com
+  - gvt2.com
+  - googleusercontent.com

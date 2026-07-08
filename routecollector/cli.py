@@ -10,9 +10,11 @@ from pathlib import Path
 from routecollector import __version__
 from routecollector.core.application import Application
 from routecollector.core.version import get_version
+from routecollector.parser.service_config import ServiceConfigSync
 
 
 DEFAULT_CONFIG = Path("config/config.yaml")
+DEFAULT_SERVICES_DIR = Path("config/services")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("version", help="Show version information")
     subparsers.add_parser("status", help="Show application status")
     subparsers.add_parser("init", help="Initialize RouteCollector state")
+    subparsers.add_parser("sync", help="Sync service configuration into database")
 
     return parser
 
@@ -79,6 +82,25 @@ def command_init(config_path: Path) -> int:
     return 0
 
 
+def command_sync(config_path: Path) -> int:
+    """Sync service configuration."""
+
+    app = Application(config_path)
+    app.initialize()
+
+    if app.repository is None:
+        raise RuntimeError("Repository is not initialized")
+
+    sync = ServiceConfigSync(app.repository, DEFAULT_SERVICES_DIR)
+    services, domains = sync.sync()
+
+    print("Service configuration synced")
+    print(f"Services: {services}")
+    print(f"Domains: {domains}")
+
+    return 0
+
+
 def main() -> int:
     """CLI entrypoint."""
 
@@ -93,6 +115,9 @@ def main() -> int:
 
     if args.command == "init":
         return command_init(args.config)
+
+    if args.command == "sync":
+        return command_sync(args.config)
 
     parser.print_help()
     return 0
