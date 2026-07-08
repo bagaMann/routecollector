@@ -11,6 +11,7 @@ from routecollector import __version__
 from routecollector.core.application import Application
 from routecollector.core.version import get_version
 from routecollector.parser.service_config import ServiceConfigSync
+from routecollector.planner.planner import RoutePlanner
 from routecollector.resolver.resolver import DnsResolver
 
 
@@ -42,12 +43,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("sync", help="Sync service configuration into database")
 
     resolve_parser = subparsers.add_parser("resolve", help="Resolve configured domains")
-    resolve_parser.add_argument(
-        "service",
-        nargs="?",
-        default=None,
-        help="Optional service name",
-    )
+    resolve_parser.add_argument("service", nargs="?", default=None)
+
+    subparsers.add_parser("plan", help="Build route plan from observations")
 
     return parser
 
@@ -129,6 +127,28 @@ def command_resolve(config_path: Path, service_name: str | None) -> int:
     return 0
 
 
+def command_plan(config_path: Path) -> int:
+    """Build and print route plan."""
+
+    app = Application(config_path)
+    app.initialize()
+
+    if app.repository is None:
+        raise RuntimeError("Repository is not initialized")
+
+    planner = RoutePlanner(app.repository)
+    routes = planner.build_plan()
+
+    print("Route plan")
+    print(f"Prefixes: {len(routes)}")
+    print()
+
+    for route in routes:
+        print(f"{route.prefix:<24} family=IPv{route.family} source_ips={route.source_ips}")
+
+    return 0
+
+
 def main() -> int:
     """CLI entrypoint."""
 
@@ -149,6 +169,9 @@ def main() -> int:
 
     if args.command == "resolve":
         return command_resolve(args.config, args.service)
+
+    if args.command == "plan":
+        return command_plan(args.config)
 
     parser.print_help()
     return 0
