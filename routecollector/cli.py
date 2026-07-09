@@ -11,7 +11,7 @@ from routecollector import __version__
 from routecollector.core.application import Application
 from routecollector.core.version import get_version
 from routecollector.exporter.bird import BirdExporter
-from routecollector.exporter.birdctl import BirdControl
+from routecollector.exporter.birdctl import BirdConfigInstaller, BirdControl
 from routecollector.parser.service_config import ServiceConfigSync
 from routecollector.planner.planner import RoutePlanner
 from routecollector.resolver.resolver import DnsResolver
@@ -20,6 +20,8 @@ from routecollector.resolver.resolver import DnsResolver
 DEFAULT_CONFIG = Path("config/config.yaml")
 DEFAULT_SERVICES_DIR = Path("config/services")
 DEFAULT_BIRD_OUTPUT = Path("bird/routecollector.conf")
+DEFAULT_BIRD_TARGET = Path("/etc/bird/routecollector.conf")
+DEFAULT_BIRD_MAIN_CONFIG = Path("/etc/bird/bird.conf")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,6 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("plan", help="Build route plan from observations")
     subparsers.add_parser("export", help="Export route plan to BIRD config file")
     subparsers.add_parser("bird-check", help="Check BIRD configuration")
+    subparsers.add_parser(
+        "install-bird-config",
+        help="Install generated RouteCollector BIRD config",
+    )
+    subparsers.add_parser(
+        "bird-reload",
+        help="Apply BIRD configuration",
+    )
 
     return parser
 
@@ -180,8 +190,38 @@ def command_bird_check() -> int:
     """Check BIRD configuration."""
 
     output = BirdControl().configure_check()
-
     print(output)
+    return 0
+
+
+def command_install_bird_config() -> int:
+    """Install generated BIRD config."""
+
+    installer = BirdConfigInstaller(
+        source_file=DEFAULT_BIRD_OUTPUT,
+        target_file=DEFAULT_BIRD_TARGET,
+        main_config=DEFAULT_BIRD_MAIN_CONFIG,
+    )
+
+    target = installer.install()
+
+    print("BIRD config installed")
+    print(f"File: {target}")
+    print()
+    print("Make sure this line exists in /etc/bird/bird.conf:")
+    print(f'include "{target}";')
+
+    return 0
+
+
+def command_bird_reload() -> int:
+    """Apply BIRD configuration."""
+
+    control = BirdControl()
+
+    print(control.configure_check())
+    print(control.configure())
+
     return 0
 
 
@@ -214,6 +254,12 @@ def main() -> int:
 
     if args.command == "bird-check":
         return command_bird_check()
+
+    if args.command == "install-bird-config":
+        return command_install_bird_config()
+
+    if args.command == "bird-reload":
+        return command_bird_reload()
 
     parser.print_help()
     return 0
