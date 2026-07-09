@@ -4,6 +4,11 @@ enabled: true
 
 sources:
   - manual
+  - domain-list-community
+
+domain_list_community:
+  lists:
+    - youtube
 
 domains:
   - youtube.com

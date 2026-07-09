@@ -11,6 +11,10 @@ from typing import Any
 import yaml
 
 from routecollector.core.repository import Repository
+from routecollector.sources.domain_list_community import (
+    DomainListCommunityClient,
+    DomainListCommunityParser,
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -22,6 +26,7 @@ class ServiceConfig:
     description: str | None
     domains: list[str]
     sources: list[str]
+    domain_list_community_lists: list[str]
 
 
 class ServiceConfigError(RuntimeError):
@@ -69,8 +74,28 @@ class ServiceConfigLoader:
         if not isinstance(sources_raw, list):
             raise ServiceConfigError(f"'sources' must be list: {filename}")
 
+        dlc_raw = data.get("domain_list_community", {})
+        if dlc_raw is None:
+            dlc_raw = {}
+
+        if not isinstance(dlc_raw, dict):
+            raise ServiceConfigError(
+                f"'domain_list_community' must be mapping: {filename}"
+            )
+
+        dlc_lists_raw = dlc_raw.get("lists", [])
+        if not isinstance(dlc_lists_raw, list):
+            raise ServiceConfigError(
+                f"'domain_list_community.lists' must be list: {filename}"
+            )
+
         domains = [str(domain).strip() for domain in domains_raw if str(domain).strip()]
         sources = [str(source).strip() for source in sources_raw if str(source).strip()]
+        dlc_lists = [
+            str(list_name).strip()
+            for list_name in dlc_lists_raw
+            if str(list_name).strip()
+        ]
 
         return ServiceConfig(
             name=name,
@@ -78,15 +103,23 @@ class ServiceConfigLoader:
             description=description if isinstance(description, str) else None,
             domains=domains,
             sources=sources,
+            domain_list_community_lists=dlc_lists,
         )
 
 
 class ServiceConfigSync:
     """Synchronize service configs into repository."""
 
-    def __init__(self, repository: Repository, services_dir: Path) -> None:
+    def __init__(
+        self,
+        repository: Repository,
+        services_dir: Path,
+        cache_dir: Path = Path("cache/domain-list-community"),
+    ) -> None:
         self._repository = repository
         self._loader = ServiceConfigLoader(services_dir)
+        self._dlc_client = DomainListCommunityClient(cache_dir)
+        self._dlc_parser = DomainListCommunityParser()
 
     def sync(self) -> tuple[int, int]:
         """Sync service configs.
@@ -114,5 +147,21 @@ class ServiceConfigSync:
                     active=True,
                 )
                 domain_count += 1
+
+            for list_name in service.domain_list_community_lists:
+                cached_file = self._dlc_client.fetch(list_name)
+                entries = self._dlc_parser.parse_file(
+                    cached_file,
+                    source_name=f"domain-list-community:{list_name}",
+                )
+
+                for entry in entries:
+                    self._repository.upsert_domain(
+                        service_id=service_id,
+                        domain=entry.domain,
+                        source=entry.source,
+                        active=True,
+                    )
+                    domain_count += 1
 
         return service_count, domain_count
