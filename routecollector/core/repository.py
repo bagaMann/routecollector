@@ -5,6 +5,7 @@ Repository layer for RouteCollector.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
 
 from routecollector.core.database import Database
 
@@ -42,6 +43,19 @@ class Observation:
     hits: int
     ttl: int | None
     confidence: int
+
+
+@dataclass(slots=True, frozen=True)
+class RouteStat:
+    """Route statistics model."""
+
+    prefix: str
+    family: int
+    source_ips: int
+    total_hits: int
+    confidence: int
+    first_seen: str | None
+    last_seen: str | None
 
 
 class Repository:
@@ -220,7 +234,7 @@ class Repository:
         with self._database.connection() as conn:
             existing = conn.execute(
                 """
-                SELECT id, hits, confidence
+                SELECT id
                 FROM observations
                 WHERE domain_id IS ? AND ip = ? AND source = ? AND dns_server IS ?
                 """,
@@ -283,6 +297,112 @@ class Repository:
                     hits=int(row["hits"]),
                     ttl=row["ttl"],
                     confidence=int(row["confidence"]),
+                )
+                for row in rows
+            ]
+
+    def rebuild_route_stats(
+        self,
+        ipv4_prefix: int = 24,
+        ipv6_prefix: int = 48,
+    ) -> int:
+        """Rebuild route statistics from observations."""
+
+        observations = self.list_observations()
+        stats: dict[str, dict[str, object]] = {}
+
+        for observation in observations:
+            ip = ipaddress.ip_address(observation.ip)
+
+            if ip.version == 4:
+                network = ipaddress.ip_network(f"{ip}/{ipv4_prefix}", strict=False)
+            else:
+                network = ipaddress.ip_network(f"{ip}/{ipv6_prefix}", strict=False)
+
+            prefix = str(network)
+
+            if prefix not in stats:
+                stats[prefix] = {
+                    "family": ip.version,
+                    "source_ips": set(),
+                    "total_hits": 0,
+                    "confidence": 0,
+                    "first_seen": None,
+                    "last_seen": None,
+                }
+
+            stat = stats[prefix]
+            source_ips = stat["source_ips"]
+            if not isinstance(source_ips, set):
+                raise RuntimeError("Invalid route statistics state")
+
+            source_ips.add(str(ip))
+            stat["total_hits"] = int(stat["total_hits"]) + observation.hits
+            stat["confidence"] = int(stat["confidence"]) + observation.confidence
+
+        with self._database.connection() as conn:
+            conn.execute("DELETE FROM route_stats")
+
+            for prefix, stat in stats.items():
+                source_ips = stat["source_ips"]
+                if not isinstance(source_ips, set):
+                    raise RuntimeError("Invalid route statistics state")
+
+                conn.execute(
+                    """
+                    INSERT INTO route_stats
+                        (
+                            prefix,
+                            family,
+                            source_ips,
+                            total_hits,
+                            confidence,
+                            first_seen,
+                            last_seen
+                        )
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        prefix,
+                        int(stat["family"]),
+                        len(source_ips),
+                        int(stat["total_hits"]),
+                        int(stat["confidence"]),
+                        stat["first_seen"],
+                        stat["last_seen"],
+                    ),
+                )
+
+        return len(stats)
+
+    def list_route_stats(self) -> list[RouteStat]:
+        """Return route statistics."""
+
+        with self._database.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    prefix,
+                    family,
+                    source_ips,
+                    total_hits,
+                    confidence,
+                    first_seen,
+                    last_seen
+                FROM route_stats
+                ORDER BY family, prefix
+                """
+            ).fetchall()
+
+            return [
+                RouteStat(
+                    prefix=str(row["prefix"]),
+                    family=int(row["family"]),
+                    source_ips=int(row["source_ips"]),
+                    total_hits=int(row["total_hits"]),
+                    confidence=int(row["confidence"]),
+                    first_seen=row["first_seen"],
+                    last_seen=row["last_seen"],
                 )
                 for row in rows
             ]

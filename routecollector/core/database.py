@@ -47,10 +47,24 @@ CREATE TABLE IF NOT EXISTS observations (
     FOREIGN KEY(domain_id) REFERENCES domains(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS route_stats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    prefix TEXT NOT NULL UNIQUE,
+    family INTEGER NOT NULL,
+    source_ips INTEGER NOT NULL,
+    total_hits INTEGER NOT NULL,
+    confidence INTEGER NOT NULL,
+    first_seen TEXT,
+    last_seen TEXT,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_domains_service_id ON domains(service_id);
 CREATE INDEX IF NOT EXISTS idx_observations_ip ON observations(ip);
 CREATE INDEX IF NOT EXISTS idx_observations_last_seen ON observations(last_seen);
 CREATE INDEX IF NOT EXISTS idx_observations_source ON observations(source);
+CREATE INDEX IF NOT EXISTS idx_route_stats_family ON route_stats(family);
+CREATE INDEX IF NOT EXISTS idx_route_stats_confidence ON route_stats(confidence);
 """
 
 

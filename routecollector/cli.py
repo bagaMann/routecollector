@@ -51,18 +51,28 @@ def build_parser() -> argparse.ArgumentParser:
     resolve_parser.add_argument("service", nargs="?", default=None)
 
     subparsers.add_parser("plan", help="Build route plan from observations")
+    subparsers.add_parser("stats", help="Rebuild and show route statistics")
     subparsers.add_parser("export", help="Export route plan to BIRD config file")
     subparsers.add_parser("bird-check", help="Check BIRD configuration")
     subparsers.add_parser(
         "install-bird-config",
         help="Install generated RouteCollector BIRD config",
     )
-    subparsers.add_parser(
-        "bird-reload",
-        help="Apply BIRD configuration",
-    )
+    subparsers.add_parser("bird-reload", help="Apply BIRD configuration")
 
     return parser
+
+
+def get_app(config_path: Path) -> Application:
+    """Create initialized application."""
+
+    app = Application(config_path)
+    app.initialize()
+
+    if app.repository is None:
+        raise RuntimeError("Repository is not initialized")
+
+    return app
 
 
 def command_version() -> int:
@@ -107,11 +117,9 @@ def command_init(config_path: Path) -> int:
 def command_sync(config_path: Path) -> int:
     """Sync service configuration."""
 
-    app = Application(config_path)
-    app.initialize()
+    app = get_app(config_path)
 
-    if app.repository is None:
-        raise RuntimeError("Repository is not initialized")
+    assert app.repository is not None
 
     sync = ServiceConfigSync(app.repository, DEFAULT_SERVICES_DIR)
     services, domains = sync.sync()
@@ -126,11 +134,9 @@ def command_sync(config_path: Path) -> int:
 def command_resolve(config_path: Path, service_name: str | None) -> int:
     """Resolve configured domains."""
 
-    app = Application(config_path)
-    app.initialize()
+    app = get_app(config_path)
 
-    if app.repository is None:
-        raise RuntimeError("Repository is not initialized")
+    assert app.repository is not None
 
     resolver = DnsResolver(app.repository)
     domains, observations = resolver.resolve_all(service_name)
@@ -145,11 +151,9 @@ def command_resolve(config_path: Path, service_name: str | None) -> int:
 def command_plan(config_path: Path) -> int:
     """Build and print route plan."""
 
-    app = Application(config_path)
-    app.initialize()
+    app = get_app(config_path)
 
-    if app.repository is None:
-        raise RuntimeError("Repository is not initialized")
+    assert app.repository is not None
 
     planner = RoutePlanner(app.repository)
     routes = planner.build_plan()
@@ -164,14 +168,38 @@ def command_plan(config_path: Path) -> int:
     return 0
 
 
+def command_stats(config_path: Path) -> int:
+    """Rebuild and print route statistics."""
+
+    app = get_app(config_path)
+
+    assert app.repository is not None
+
+    count = app.repository.rebuild_route_stats()
+    stats = app.repository.list_route_stats()
+
+    print("Route statistics rebuilt")
+    print(f"Prefixes: {count}")
+    print()
+
+    for stat in stats:
+        print(
+            f"{stat.prefix:<24} "
+            f"family=IPv{stat.family} "
+            f"source_ips={stat.source_ips:<4} "
+            f"hits={stat.total_hits:<5} "
+            f"confidence={stat.confidence}"
+        )
+
+    return 0
+
+
 def command_export(config_path: Path) -> int:
     """Export route plan to BIRD config file."""
 
-    app = Application(config_path)
-    app.initialize()
+    app = get_app(config_path)
 
-    if app.repository is None:
-        raise RuntimeError("Repository is not initialized")
+    assert app.repository is not None
 
     planner = RoutePlanner(app.repository)
     routes = planner.build_plan()
@@ -248,6 +276,9 @@ def main() -> int:
 
     if args.command == "plan":
         return command_plan(args.config)
+
+    if args.command == "stats":
+        return command_stats(args.config)
 
     if args.command == "export":
         return command_export(args.config)
