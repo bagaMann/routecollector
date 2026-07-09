@@ -50,9 +50,16 @@ def build_parser() -> argparse.ArgumentParser:
     resolve_parser = subparsers.add_parser("resolve", help="Resolve configured domains")
     resolve_parser.add_argument("service", nargs="?", default=None)
 
-    subparsers.add_parser("plan", help="Build route plan from observations")
+    plan_parser = subparsers.add_parser("plan", help="Build route plan from statistics")
+    plan_parser.add_argument("--min-confidence-ipv4", type=int, default=10)
+    plan_parser.add_argument("--min-confidence-ipv6", type=int, default=10)
+
     subparsers.add_parser("stats", help="Rebuild and show route statistics")
-    subparsers.add_parser("export", help="Export route plan to BIRD config file")
+
+    export_parser = subparsers.add_parser("export", help="Export route plan to BIRD")
+    export_parser.add_argument("--min-confidence-ipv4", type=int, default=10)
+    export_parser.add_argument("--min-confidence-ipv6", type=int, default=10)
+
     subparsers.add_parser("bird-check", help="Check BIRD configuration")
     subparsers.add_parser(
         "install-bird-config",
@@ -148,14 +155,22 @@ def command_resolve(config_path: Path, service_name: str | None) -> int:
     return 0
 
 
-def command_plan(config_path: Path) -> int:
+def command_plan(
+    config_path: Path,
+    min_confidence_ipv4: int,
+    min_confidence_ipv6: int,
+) -> int:
     """Build and print route plan."""
 
     app = get_app(config_path)
 
     assert app.repository is not None
 
-    planner = RoutePlanner(app.repository)
+    planner = RoutePlanner(
+        app.repository,
+        min_confidence_ipv4=min_confidence_ipv4,
+        min_confidence_ipv6=min_confidence_ipv6,
+    )
     routes = planner.build_plan()
 
     print("Route plan")
@@ -163,7 +178,12 @@ def command_plan(config_path: Path) -> int:
     print()
 
     for route in routes:
-        print(f"{route.prefix:<24} family=IPv{route.family} source_ips={route.source_ips}")
+        print(
+            f"{route.prefix:<24} "
+            f"family=IPv{route.family} "
+            f"source_ips={route.source_ips:<4} "
+            f"confidence={route.confidence}"
+        )
 
     return 0
 
@@ -194,14 +214,22 @@ def command_stats(config_path: Path) -> int:
     return 0
 
 
-def command_export(config_path: Path) -> int:
+def command_export(
+    config_path: Path,
+    min_confidence_ipv4: int,
+    min_confidence_ipv6: int,
+) -> int:
     """Export route plan to BIRD config file."""
 
     app = get_app(config_path)
 
     assert app.repository is not None
 
-    planner = RoutePlanner(app.repository)
+    planner = RoutePlanner(
+        app.repository,
+        min_confidence_ipv4=min_confidence_ipv4,
+        min_confidence_ipv6=min_confidence_ipv6,
+    )
     routes = planner.build_plan()
 
     exporter = BirdExporter(DEFAULT_BIRD_OUTPUT)
@@ -275,13 +303,21 @@ def main() -> int:
         return command_resolve(args.config, args.service)
 
     if args.command == "plan":
-        return command_plan(args.config)
+        return command_plan(
+            args.config,
+            args.min_confidence_ipv4,
+            args.min_confidence_ipv6,
+        )
 
     if args.command == "stats":
         return command_stats(args.config)
 
     if args.command == "export":
-        return command_export(args.config)
+        return command_export(
+            args.config,
+            args.min_confidence_ipv4,
+            args.min_confidence_ipv6,
+        )
 
     if args.command == "bird-check":
         return command_bird_check()

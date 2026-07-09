@@ -33,7 +33,10 @@ class BirdExporter:
         ipv6_routes = [route for route in routes if route.family == 6]
 
         for route in ipv4_routes:
-            lines.append(f"    route {route.prefix} blackhole;")
+            lines.append(
+                f"    route {route.prefix} blackhole; "
+                f"# confidence={route.confidence} source_ips={route.source_ips}"
+            )
 
         lines.extend(
             [
@@ -46,7 +49,10 @@ class BirdExporter:
         )
 
         for route in ipv6_routes:
-            lines.append(f"    route {route.prefix} blackhole;")
+            lines.append(
+                f"    route {route.prefix} blackhole; "
+                f"# confidence={route.confidence} source_ips={route.source_ips}"
+            )
 
         lines.append("}")
         lines.append("")
