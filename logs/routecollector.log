@@ -35,3 +35,8 @@
 2026-07-10 19:26:09,676 | INFO     | routecollector | Application initialized
 2026-07-10 19:43:48,096 | INFO     | routecollector | Application initialized
 2026-07-10 19:54:53,294 | INFO     | routecollector | Application initialized
+2026-07-10 22:21:03,836 | INFO     | routecollector | Application initialized
+2026-07-10 22:21:03,836 | INFO     | routecollector | RouteCollector daemon started with interval=120 seconds
+2026-07-10 22:21:33,302 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2852 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-10 22:22:50,536 | INFO     | routecollector | Received signal 2, stopping daemon
+2026-07-10 22:22:51,310 | INFO     | routecollector | RouteCollector daemon stopped

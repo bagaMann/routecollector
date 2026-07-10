@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Sequence
 
 from routecollector import __version__
 from routecollector.core.application import Application
@@ -13,8 +14,12 @@ from routecollector.core.version import get_version
 from routecollector.exporter.bird import BirdExporter
 from routecollector.exporter.birdctl import BirdConfigInstaller, BirdControl
 from routecollector.parser.service_config import ServiceConfigSync
-from routecollector.planner.planner import RoutePlanner
+from routecollector.planner.planner import PlannedRoute, RoutePlanner
 from routecollector.resolver.resolver import DnsResolver
+from routecollector.workflow.daemon import (
+    DaemonConfig,
+    RouteCollectorDaemon,
+)
 from routecollector.workflow.run_once import RunOnceWorkflow
 
 
@@ -23,6 +28,27 @@ DEFAULT_SERVICES_DIR = Path("config/services")
 DEFAULT_BIRD_OUTPUT = Path("bird/routecollector.conf")
 DEFAULT_BIRD_TARGET = Path("/etc/bird/routecollector.conf")
 DEFAULT_BIRD_MAIN_CONFIG = Path("/etc/bird/bird.conf")
+DEFAULT_DAEMON_LOCK = Path("state/routecollector.lock")
+DEFAULT_DAEMON_INTERVAL = 1800
+
+
+def add_confidence_arguments(
+    parser: argparse.ArgumentParser,
+) -> None:
+    """Add route-confidence arguments to a command parser."""
+
+    parser.add_argument(
+        "--min-confidence-ipv4",
+        type=int,
+        default=10,
+        help="Minimum confidence for IPv4 routes",
+    )
+    parser.add_argument(
+        "--min-confidence-ipv6",
+        type=int,
+        default=10,
+        help="Minimum confidence for IPv6 routes",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,12 +69,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("version", help="Show version information")
-    subparsers.add_parser("status", help="Show application status")
-    subparsers.add_parser("init", help="Initialize RouteCollector state")
+    subparsers.add_parser(
+        "version",
+        help="Show version information",
+    )
+    subparsers.add_parser(
+        "status",
+        help="Show application status",
+    )
+    subparsers.add_parser(
+        "init",
+        help="Initialize RouteCollector state",
+    )
     subparsers.add_parser(
         "sync",
-        help="Sync service configuration into database",
+        help="Synchronize service configuration",
     )
 
     resolve_parser = subparsers.add_parser(
@@ -94,7 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_once_parser = subparsers.add_parser(
         "run-once",
-        help="Run complete update cycle without reloading BIRD",
+        help="Run one complete update cycle",
     )
     run_once_parser.add_argument(
         "service",
@@ -104,24 +139,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_confidence_arguments(run_once_parser)
 
+    daemon_parser = subparsers.add_parser(
+        "daemon",
+        help="Run RouteCollector continuously",
+    )
+    daemon_parser.add_argument(
+        "--interval",
+        type=int,
+        default=DEFAULT_DAEMON_INTERVAL,
+        help="Seconds between update cycles",
+    )
+    daemon_parser.add_argument(
+        "--service",
+        default=None,
+        help="Optional service name",
+    )
+    daemon_parser.add_argument(
+        "--lock-file",
+        type=Path,
+        default=DEFAULT_DAEMON_LOCK,
+        help="Daemon process lock file",
+    )
+    add_confidence_arguments(daemon_parser)
+
     return parser
-
-
-def add_confidence_arguments(
-    parser: argparse.ArgumentParser,
-) -> None:
-    """Add route confidence options to a command parser."""
-
-    parser.add_argument(
-        "--min-confidence-ipv4",
-        type=int,
-        default=10,
-    )
-    parser.add_argument(
-        "--min-confidence-ipv6",
-        type=int,
-        default=10,
-    )
 
 
 def get_app(config_path: Path) -> Application:
@@ -134,6 +175,44 @@ def get_app(config_path: Path) -> Application:
         raise RuntimeError("Repository is not initialized")
 
     return app
+
+
+def build_workflow(
+    app: Application,
+    min_confidence_ipv4: int,
+    min_confidence_ipv6: int,
+) -> RunOnceWorkflow:
+    """Build complete RouteCollector workflow."""
+
+    if app.repository is None:
+        raise RuntimeError("Repository is not initialized")
+
+    return RunOnceWorkflow(
+        repository=app.repository,
+        services_dir=DEFAULT_SERVICES_DIR,
+        generated_config=DEFAULT_BIRD_OUTPUT,
+        installed_config=DEFAULT_BIRD_TARGET,
+        main_bird_config=DEFAULT_BIRD_MAIN_CONFIG,
+        min_confidence_ipv4=min_confidence_ipv4,
+        min_confidence_ipv6=min_confidence_ipv6,
+    )
+
+
+def build_route_plan(
+    app: Application,
+    min_confidence_ipv4: int,
+    min_confidence_ipv6: int,
+) -> list[PlannedRoute]:
+    """Build route plan for initialized application."""
+
+    if app.repository is None:
+        raise RuntimeError("Repository is not initialized")
+
+    return RoutePlanner(
+        repository=app.repository,
+        min_confidence_ipv4=min_confidence_ipv4,
+        min_confidence_ipv6=min_confidence_ipv6,
+    ).build_plan()
 
 
 def command_version() -> int:
@@ -179,6 +258,7 @@ def command_sync(config_path: Path) -> int:
     """Synchronize service configuration."""
 
     app = get_app(config_path)
+
     assert app.repository is not None
 
     services, domains = ServiceConfigSync(
@@ -200,6 +280,7 @@ def command_resolve(
     """Resolve configured domains."""
 
     app = get_app(config_path)
+
     assert app.repository is not None
 
     domains, observations = DnsResolver(
@@ -211,22 +292,6 @@ def command_resolve(
     print(f"Observations: {observations}")
 
     return 0
-
-
-def build_route_plan(
-    app: Application,
-    min_confidence_ipv4: int,
-    min_confidence_ipv6: int,
-):
-    """Build a route plan for an initialized application."""
-
-    assert app.repository is not None
-
-    return RoutePlanner(
-        repository=app.repository,
-        min_confidence_ipv4=min_confidence_ipv4,
-        min_confidence_ipv6=min_confidence_ipv6,
-    ).build_plan()
 
 
 def command_plan(
@@ -262,6 +327,7 @@ def command_stats(config_path: Path) -> int:
     """Rebuild and print route statistics."""
 
     app = get_app(config_path)
+
     assert app.repository is not None
 
     count = app.repository.rebuild_route_stats()
@@ -316,6 +382,7 @@ def command_bird_check() -> int:
     """Check BIRD configuration."""
 
     print(BirdControl().configure_check())
+
     return 0
 
 
@@ -352,19 +419,14 @@ def command_run_once(
     min_confidence_ipv4: int,
     min_confidence_ipv6: int,
 ) -> int:
-    """Execute complete update cycle without reloading BIRD."""
+    """Execute one complete update cycle."""
 
     app = get_app(config_path)
-    assert app.repository is not None
 
-    result = RunOnceWorkflow(
-        repository=app.repository,
-        services_dir=DEFAULT_SERVICES_DIR,
-        generated_config=DEFAULT_BIRD_OUTPUT,
-        installed_config=DEFAULT_BIRD_TARGET,
-        main_bird_config=DEFAULT_BIRD_MAIN_CONFIG,
-        min_confidence_ipv4=min_confidence_ipv4,
-        min_confidence_ipv6=min_confidence_ipv6,
+    result = build_workflow(
+        app,
+        min_confidence_ipv4,
+        min_confidence_ipv6,
     ).run(service_name)
 
     print("RouteCollector cycle completed")
@@ -389,19 +451,57 @@ def command_run_once(
     print(result.bird_check_output)
     print()
 
-    if result.installed_changed:
-        print("BIRD configuration changed; reload is required.")
+    if result.bird_reloaded:
+        print("BIRD configuration was reloaded automatically.")
+    elif result.installed_changed:
+        print("BIRD configuration changed but was not reloaded.")
     else:
         print("No BIRD route changes detected; reload is not required.")
 
     return 0
 
 
-def main() -> int:
+def command_daemon(
+    config_path: Path,
+    interval_seconds: int,
+    service_name: str | None,
+    lock_file: Path,
+    min_confidence_ipv4: int,
+    min_confidence_ipv6: int,
+) -> int:
+    """Run RouteCollector continuously."""
+
+    app = get_app(config_path)
+
+    if app.logger is None:
+        raise RuntimeError("Logger is not initialized")
+
+    workflow = build_workflow(
+        app,
+        min_confidence_ipv4,
+        min_confidence_ipv6,
+    )
+
+    daemon = RouteCollectorDaemon(
+        workflow=workflow,
+        config=DaemonConfig(
+            interval_seconds=interval_seconds,
+            lock_file=lock_file,
+            service_name=service_name,
+        ),
+        logger=app.logger,
+    )
+
+    daemon.run()
+
+    return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     """CLI entrypoint."""
 
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.command == "version":
         return command_version()
@@ -416,7 +516,10 @@ def main() -> int:
         return command_sync(args.config)
 
     if args.command == "resolve":
-        return command_resolve(args.config, args.service)
+        return command_resolve(
+            args.config,
+            args.service,
+        )
 
     if args.command == "plan":
         return command_plan(
@@ -448,6 +551,16 @@ def main() -> int:
         return command_run_once(
             args.config,
             args.service,
+            args.min_confidence_ipv4,
+            args.min_confidence_ipv6,
+        )
+
+    if args.command == "daemon":
+        return command_daemon(
+            args.config,
+            args.interval,
+            args.service,
+            args.lock_file,
             args.min_confidence_ipv4,
             args.min_confidence_ipv6,
         )
