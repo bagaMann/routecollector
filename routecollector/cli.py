@@ -15,6 +15,7 @@ from routecollector.exporter.birdctl import BirdConfigInstaller, BirdControl
 from routecollector.parser.service_config import ServiceConfigSync
 from routecollector.planner.planner import RoutePlanner
 from routecollector.resolver.resolver import DnsResolver
+from routecollector.workflow.run_once import RunOnceWorkflow
 
 
 DEFAULT_CONFIG = Path("config/config.yaml")
@@ -47,25 +48,85 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("init", help="Initialize RouteCollector state")
     subparsers.add_parser("sync", help="Sync service configuration into database")
 
-    resolve_parser = subparsers.add_parser("resolve", help="Resolve configured domains")
-    resolve_parser.add_argument("service", nargs="?", default=None)
+    resolve_parser = subparsers.add_parser(
+        "resolve",
+        help="Resolve configured domains",
+    )
+    resolve_parser.add_argument(
+        "service",
+        nargs="?",
+        default=None,
+        help="Optional service name",
+    )
 
-    plan_parser = subparsers.add_parser("plan", help="Build route plan from statistics")
-    plan_parser.add_argument("--min-confidence-ipv4", type=int, default=10)
-    plan_parser.add_argument("--min-confidence-ipv6", type=int, default=10)
+    plan_parser = subparsers.add_parser(
+        "plan",
+        help="Build route plan from statistics",
+    )
+    plan_parser.add_argument(
+        "--min-confidence-ipv4",
+        type=int,
+        default=10,
+    )
+    plan_parser.add_argument(
+        "--min-confidence-ipv6",
+        type=int,
+        default=10,
+    )
 
-    subparsers.add_parser("stats", help="Rebuild and show route statistics")
+    subparsers.add_parser(
+        "stats",
+        help="Rebuild and show route statistics",
+    )
 
-    export_parser = subparsers.add_parser("export", help="Export route plan to BIRD")
-    export_parser.add_argument("--min-confidence-ipv4", type=int, default=10)
-    export_parser.add_argument("--min-confidence-ipv6", type=int, default=10)
+    export_parser = subparsers.add_parser(
+        "export",
+        help="Export route plan to BIRD",
+    )
+    export_parser.add_argument(
+        "--min-confidence-ipv4",
+        type=int,
+        default=10,
+    )
+    export_parser.add_argument(
+        "--min-confidence-ipv6",
+        type=int,
+        default=10,
+    )
 
-    subparsers.add_parser("bird-check", help="Check BIRD configuration")
+    subparsers.add_parser(
+        "bird-check",
+        help="Check BIRD configuration",
+    )
     subparsers.add_parser(
         "install-bird-config",
         help="Install generated RouteCollector BIRD config",
     )
-    subparsers.add_parser("bird-reload", help="Apply BIRD configuration")
+    subparsers.add_parser(
+        "bird-reload",
+        help="Apply BIRD configuration",
+    )
+
+    run_once_parser = subparsers.add_parser(
+        "run-once",
+        help="Run complete update cycle without reloading BIRD",
+    )
+    run_once_parser.add_argument(
+        "service",
+        nargs="?",
+        default=None,
+        help="Optional service name",
+    )
+    run_once_parser.add_argument(
+        "--min-confidence-ipv4",
+        type=int,
+        default=10,
+    )
+    run_once_parser.add_argument(
+        "--min-confidence-ipv6",
+        type=int,
+        default=10,
+    )
 
     return parser
 
@@ -128,7 +189,10 @@ def command_sync(config_path: Path) -> int:
 
     assert app.repository is not None
 
-    sync = ServiceConfigSync(app.repository, DEFAULT_SERVICES_DIR)
+    sync = ServiceConfigSync(
+        repository=app.repository,
+        services_dir=DEFAULT_SERVICES_DIR,
+    )
     services, domains = sync.sync()
 
     print("Service configuration synced")
@@ -138,7 +202,10 @@ def command_sync(config_path: Path) -> int:
     return 0
 
 
-def command_resolve(config_path: Path, service_name: str | None) -> int:
+def command_resolve(
+    config_path: Path,
+    service_name: str | None,
+) -> int:
     """Resolve configured domains."""
 
     app = get_app(config_path)
@@ -167,7 +234,7 @@ def command_plan(
     assert app.repository is not None
 
     planner = RoutePlanner(
-        app.repository,
+        repository=app.repository,
         min_confidence_ipv4=min_confidence_ipv4,
         min_confidence_ipv6=min_confidence_ipv6,
     )
@@ -226,11 +293,16 @@ def command_export(
     assert app.repository is not None
 
     planner = RoutePlanner(
-        app.repository,
+        repository=app.repository,
         min_confidence_ipv4=min_confidence_ipv4,
         min_confidence_ipv6=min_confidence_ipv6,
     )
     routes = planner.build_plan()
+
+    if not routes:
+        raise RuntimeError(
+            "Route plan is empty; refusing to generate BIRD configuration"
+        )
 
     exporter = BirdExporter(DEFAULT_BIRD_OUTPUT)
     output_file = exporter.export(routes)
@@ -247,6 +319,7 @@ def command_bird_check() -> int:
 
     output = BirdControl().configure_check()
     print(output)
+
     return 0
 
 
@@ -264,7 +337,7 @@ def command_install_bird_config() -> int:
     print("BIRD config installed")
     print(f"File: {target}")
     print()
-    print("Make sure this line exists in /etc/bird/bird.conf:")
+    print("Required include line:")
     print(f'include "{target}";')
 
     return 0
@@ -277,6 +350,48 @@ def command_bird_reload() -> int:
 
     print(control.configure_check())
     print(control.configure())
+
+    return 0
+
+
+def command_run_once(
+    config_path: Path,
+    service_name: str | None,
+    min_confidence_ipv4: int,
+    min_confidence_ipv6: int,
+) -> int:
+    """Execute complete update cycle without reloading BIRD."""
+
+    app = get_app(config_path)
+
+    assert app.repository is not None
+
+    workflow = RunOnceWorkflow(
+        repository=app.repository,
+        services_dir=DEFAULT_SERVICES_DIR,
+        generated_config=DEFAULT_BIRD_OUTPUT,
+        installed_config=DEFAULT_BIRD_TARGET,
+        main_bird_config=DEFAULT_BIRD_MAIN_CONFIG,
+        min_confidence_ipv4=min_confidence_ipv4,
+        min_confidence_ipv6=min_confidence_ipv6,
+    )
+
+    result = workflow.run(service_name)
+
+    print("RouteCollector cycle completed")
+    print()
+    print(f"Services synced:     {result.services_synced}")
+    print(f"Domains synced:      {result.domains_synced}")
+    print(f"Domains resolved:    {result.domains_resolved}")
+    print(f"Observations stored: {result.observations_stored}")
+    print(f"Route statistics:    {result.route_stats_built}")
+    print(f"Planned routes:      {result.planned_routes}")
+    print(f"Generated config:    {result.generated_config}")
+    print(f"Installed config:    {result.installed_config}")
+    print()
+    print(result.bird_check_output)
+    print()
+    print("BIRD configuration was not reloaded.")
 
     return 0
 
@@ -300,7 +415,10 @@ def main() -> int:
         return command_sync(args.config)
 
     if args.command == "resolve":
-        return command_resolve(args.config, args.service)
+        return command_resolve(
+            args.config,
+            args.service,
+        )
 
     if args.command == "plan":
         return command_plan(
@@ -327,6 +445,14 @@ def main() -> int:
 
     if args.command == "bird-reload":
         return command_bird_reload()
+
+    if args.command == "run-once":
+        return command_run_once(
+            args.config,
+            args.service,
+            args.min_confidence_ipv4,
+            args.min_confidence_ipv6,
+        )
 
     parser.print_help()
     return 0
