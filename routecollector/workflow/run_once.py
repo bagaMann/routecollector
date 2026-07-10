@@ -1,9 +1,5 @@
 """
 Single-run RouteCollector workflow.
-
-This module executes a complete data collection and route generation cycle.
-It installs a generated BIRD configuration only when its content changed,
-checks the resulting BIRD configuration, but does not reload BIRD.
 """
 
 from __future__ import annotations
@@ -13,19 +9,23 @@ from pathlib import Path
 
 from routecollector.core.repository import Repository
 from routecollector.exporter.bird import BirdExporter
-from routecollector.exporter.birdctl import BirdConfigInstaller, BirdControl
+from routecollector.exporter.birdctl import (
+    BirdConfigInstaller,
+    BirdControl,
+    BirdControlError,
+)
 from routecollector.parser.service_config import ServiceConfigSync
 from routecollector.planner.planner import RoutePlanner
 from routecollector.resolver.resolver import DnsResolver
 
 
 class RunOnceError(RuntimeError):
-    """Run-once workflow error."""
+    """Workflow execution error."""
 
 
 @dataclass(slots=True, frozen=True)
 class RunOnceResult:
-    """Result of a complete RouteCollector cycle."""
+    """Result of one complete RouteCollector cycle."""
 
     services_synced: int
     domains_synced: int
@@ -33,15 +33,22 @@ class RunOnceResult:
     observations_stored: int
     route_stats_built: int
     planned_routes: int
+
     generated_config: Path
     generated_changed: bool
+
     installed_config: Path
     installed_changed: bool
+
     bird_check_output: str
+    bird_reload_output: str | None
+
+    bird_reloaded: bool
+    rollback_performed: bool
 
 
 class RunOnceWorkflow:
-    """Execute one complete RouteCollector update cycle."""
+    """Execute one complete RouteCollector cycle."""
 
     def __init__(
         self,
@@ -61,28 +68,28 @@ class RunOnceWorkflow:
         self._min_confidence_ipv4 = min_confidence_ipv4
         self._min_confidence_ipv6 = min_confidence_ipv6
 
-    def run(self, service_name: str | None = None) -> RunOnceResult:
-        """Execute a complete update cycle without reloading BIRD."""
+    def run(
+        self,
+        service_name: str | None = None,
+    ) -> RunOnceResult:
+        """Execute a complete update cycle."""
 
-        sync = ServiceConfigSync(
+        services_synced, domains_synced = ServiceConfigSync(
             repository=self._repository,
             services_dir=self._services_dir,
-        )
-        services_synced, domains_synced = sync.sync()
+        ).sync()
 
-        resolver = DnsResolver(self._repository)
-        domains_resolved, observations_stored = resolver.resolve_all(
-            service_name
-        )
+        domains_resolved, observations_stored = DnsResolver(
+            self._repository
+        ).resolve_all(service_name)
 
         route_stats_built = self._repository.rebuild_route_stats()
 
-        planner = RoutePlanner(
+        routes = RoutePlanner(
             repository=self._repository,
             min_confidence_ipv4=self._min_confidence_ipv4,
             min_confidence_ipv6=self._min_confidence_ipv6,
-        )
-        routes = planner.build_plan()
+        ).build_plan()
 
         if not routes:
             raise RunOnceError(
@@ -93,13 +100,45 @@ class RunOnceWorkflow:
             self._generated_config
         ).export(routes)
 
-        install_result = BirdConfigInstaller(
+        installer = BirdConfigInstaller(
             source_file=export_result.path,
             target_file=self._installed_config,
             main_config=self._main_bird_config,
-        ).install()
+        )
 
-        bird_check_output = BirdControl().configure_check()
+        install_result = installer.install()
+        bird = BirdControl()
+
+        bird_check_output = ""
+        bird_reload_output: str | None = None
+        bird_reloaded = False
+        rollback_performed = False
+
+        try:
+            bird_check_output = bird.configure_check()
+
+            if install_result.changed:
+                bird_reload_output = bird.configure()
+                bird_reloaded = True
+                installer.remove_backup(install_result.backup_path)
+
+        except BirdControlError as exc:
+            if install_result.changed:
+                installer.rollback(install_result.backup_path)
+                rollback_performed = True
+
+                try:
+                    bird.configure_check()
+                    bird.configure()
+                except BirdControlError as rollback_exc:
+                    raise RunOnceError(
+                        "New BIRD configuration failed and rollback "
+                        f"could not be applied: {rollback_exc}"
+                    ) from rollback_exc
+
+            raise RunOnceError(
+                f"New BIRD configuration rejected; rollback completed: {exc}"
+            ) from exc
 
         return RunOnceResult(
             services_synced=services_synced,
@@ -113,4 +152,7 @@ class RunOnceWorkflow:
             installed_config=install_result.path,
             installed_changed=install_result.changed,
             bird_check_output=bird_check_output,
+            bird_reload_output=bird_reload_output,
+            bird_reloaded=bird_reloaded,
+            rollback_performed=rollback_performed,
         )

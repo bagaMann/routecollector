@@ -19,6 +19,7 @@ class BirdInstallResult:
     """Result of installing a generated BIRD configuration."""
 
     path: Path
+    backup_path: Path | None
     changed: bool
 
 
@@ -34,12 +35,12 @@ class BirdControl:
         self._timeout = timeout
 
     def configure_check(self) -> str:
-        """Check the active BIRD configuration without applying it."""
+        """Check the current BIRD configuration."""
 
         return self._run(["configure", "check"])
 
     def configure(self) -> str:
-        """Apply the active BIRD configuration."""
+        """Apply the current BIRD configuration."""
 
         return self._run(["configure"])
 
@@ -78,7 +79,7 @@ class BirdControl:
 
 
 class BirdConfigInstaller:
-    """Install a generated RouteCollector configuration for BIRD."""
+    """Install and roll back RouteCollector BIRD configuration."""
 
     def __init__(
         self,
@@ -98,11 +99,13 @@ class BirdConfigInstaller:
         if self._files_are_equal():
             return BirdInstallResult(
                 path=self._target_file,
+                backup_path=None,
                 changed=False,
             )
 
         self._target_file.parent.mkdir(parents=True, exist_ok=True)
 
+        backup_path = self._create_backup()
         temporary_file = self._target_file.with_suffix(
             self._target_file.suffix + ".tmp"
         )
@@ -112,14 +115,68 @@ class BirdConfigInstaller:
             temporary_file.replace(self._target_file)
         except OSError as exc:
             temporary_file.unlink(missing_ok=True)
+            self.rollback(backup_path)
+
             raise BirdControlError(
                 f"Unable to install BIRD configuration: {exc}"
             ) from exc
 
         return BirdInstallResult(
             path=self._target_file,
+            backup_path=backup_path,
             changed=True,
         )
+
+    def rollback(self, backup_path: Path | None) -> None:
+        """Restore previously installed configuration."""
+
+        if backup_path is None:
+            self._target_file.unlink(missing_ok=True)
+            return
+
+        if not backup_path.is_file():
+            raise BirdControlError(
+                f"BIRD configuration backup not found: {backup_path}"
+            )
+
+        temporary_file = self._target_file.with_suffix(
+            self._target_file.suffix + ".rollback.tmp"
+        )
+
+        try:
+            shutil.copyfile(backup_path, temporary_file)
+            temporary_file.replace(self._target_file)
+        except OSError as exc:
+            temporary_file.unlink(missing_ok=True)
+
+            raise BirdControlError(
+                f"Unable to restore BIRD configuration: {exc}"
+            ) from exc
+
+    def remove_backup(self, backup_path: Path | None) -> None:
+        """Remove backup after successful configuration reload."""
+
+        if backup_path is not None:
+            backup_path.unlink(missing_ok=True)
+
+    def _create_backup(self) -> Path | None:
+        """Create backup of the currently installed configuration."""
+
+        if not self._target_file.is_file():
+            return None
+
+        backup_path = self._target_file.with_suffix(
+            self._target_file.suffix + ".bak"
+        )
+
+        try:
+            shutil.copyfile(self._target_file, backup_path)
+        except OSError as exc:
+            raise BirdControlError(
+                f"Unable to back up BIRD configuration: {exc}"
+            ) from exc
+
+        return backup_path
 
     def _validate_paths(self) -> None:
         """Validate source and main BIRD configuration paths."""
