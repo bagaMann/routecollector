@@ -5,6 +5,7 @@ Repository layer for RouteCollector.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import ipaddress
 
 from routecollector.core.database import Database
@@ -43,6 +44,8 @@ class Observation:
     hits: int
     ttl: int | None
     confidence: int
+    first_seen: str
+    last_seen: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -60,6 +63,8 @@ class RouteStat:
 
 class Repository:
     """Application repository."""
+
+    CONFIDENCE_INTERVAL_SECONDS = 3600
 
     def __init__(self, database: Database) -> None:
         self._database = database
@@ -229,43 +234,72 @@ class Repository:
         ttl: int | None,
         confidence: int = 1,
     ) -> int:
-        """Insert or update DNS observation."""
+        """Insert or update a DNS observation.
+
+        Hits increase on every observation. Confidence increases only once
+        per configured interval for the same domain, IP, source and resolver.
+        """
 
         with self._database.connection() as conn:
             existing = conn.execute(
                 """
-                SELECT id
+                SELECT id, last_seen
                 FROM observations
-                WHERE domain_id IS ? AND ip = ? AND source = ? AND dns_server IS ?
+                WHERE domain_id IS ?
+                  AND ip = ?
+                  AND source = ?
+                  AND dns_server IS ?
                 """,
                 (domain_id, ip, source, dns_server),
             ).fetchone()
 
-            if existing is not None:
-                conn.execute(
+            if existing is None:
+                cursor = conn.execute(
                     """
-                    UPDATE observations
-                    SET
-                        last_seen = CURRENT_TIMESTAMP,
-                        hits = hits + 1,
-                        ttl = ?,
-                        confidence = confidence + ?
-                    WHERE id = ?
+                    INSERT INTO observations
+                        (domain_id, ip, source, dns_server, ttl, confidence)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (ttl, confidence, int(existing["id"])),
+                    (
+                        domain_id,
+                        ip,
+                        source,
+                        dns_server,
+                        ttl,
+                        confidence,
+                    ),
                 )
-                return int(existing["id"])
 
-            cursor = conn.execute(
-                """
-                INSERT INTO observations
-                    (domain_id, ip, source, dns_server, ttl, confidence)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (domain_id, ip, source, dns_server, ttl, confidence),
+                return int(cursor.lastrowid)
+
+            last_seen = datetime.fromisoformat(str(existing["last_seen"]))
+            now = datetime.now()
+            elapsed_seconds = (now - last_seen).total_seconds()
+
+            confidence_increment = (
+                confidence
+                if elapsed_seconds >= self.CONFIDENCE_INTERVAL_SECONDS
+                else 0
             )
 
-            return int(cursor.lastrowid)
+            conn.execute(
+                """
+                UPDATE observations
+                SET
+                    last_seen = CURRENT_TIMESTAMP,
+                    hits = hits + 1,
+                    ttl = ?,
+                    confidence = confidence + ?
+                WHERE id = ?
+                """,
+                (
+                    ttl,
+                    confidence_increment,
+                    int(existing["id"]),
+                ),
+            )
+
+            return int(existing["id"])
 
     def list_observations(self) -> list[Observation]:
         """Return all observations."""
@@ -281,7 +315,9 @@ class Repository:
                     dns_server,
                     hits,
                     ttl,
-                    confidence
+                    confidence,
+                    first_seen,
+                    last_seen
                 FROM observations
                 ORDER BY last_seen DESC
                 """
@@ -297,6 +333,8 @@ class Repository:
                     hits=int(row["hits"]),
                     ttl=row["ttl"],
                     confidence=int(row["confidence"]),
+                    first_seen=str(row["first_seen"]),
+                    last_seen=str(row["last_seen"]),
                 )
                 for row in rows
             ]
@@ -314,11 +352,11 @@ class Repository:
         for observation in observations:
             ip = ipaddress.ip_address(observation.ip)
 
-            if ip.version == 4:
-                network = ipaddress.ip_network(f"{ip}/{ipv4_prefix}", strict=False)
-            else:
-                network = ipaddress.ip_network(f"{ip}/{ipv6_prefix}", strict=False)
-
+            prefix_length = ipv4_prefix if ip.version == 4 else ipv6_prefix
+            network = ipaddress.ip_network(
+                f"{ip}/{prefix_length}",
+                strict=False,
+            )
             prefix = str(network)
 
             if prefix not in stats:
@@ -327,24 +365,39 @@ class Repository:
                     "source_ips": set(),
                     "total_hits": 0,
                     "confidence": 0,
-                    "first_seen": None,
-                    "last_seen": None,
+                    "first_seen": observation.first_seen,
+                    "last_seen": observation.last_seen,
                 }
 
             stat = stats[prefix]
             source_ips = stat["source_ips"]
+
             if not isinstance(source_ips, set):
                 raise RuntimeError("Invalid route statistics state")
 
             source_ips.add(str(ip))
-            stat["total_hits"] = int(stat["total_hits"]) + observation.hits
-            stat["confidence"] = int(stat["confidence"]) + observation.confidence
+            stat["total_hits"] = (
+                int(stat["total_hits"]) + observation.hits
+            )
+            stat["confidence"] = (
+                int(stat["confidence"]) + observation.confidence
+            )
+
+            first_seen = str(stat["first_seen"])
+            last_seen = str(stat["last_seen"])
+
+            if observation.first_seen < first_seen:
+                stat["first_seen"] = observation.first_seen
+
+            if observation.last_seen > last_seen:
+                stat["last_seen"] = observation.last_seen
 
         with self._database.connection() as conn:
             conn.execute("DELETE FROM route_stats")
 
             for prefix, stat in stats.items():
                 source_ips = stat["source_ips"]
+
                 if not isinstance(source_ips, set):
                     raise RuntimeError("Invalid route statistics state")
 

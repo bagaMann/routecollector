@@ -26,7 +26,7 @@ class BirdExporter:
         self._output_file = output_file
 
     def export(self, routes: list[PlannedRoute]) -> BirdExportResult:
-        """Generate BIRD configuration if its content has changed."""
+        """Generate BIRD configuration if route content has changed."""
 
         content = self.render(routes)
         previous_content = self._read_existing_content()
@@ -48,7 +48,7 @@ class BirdExporter:
 
     @staticmethod
     def render(routes: list[PlannedRoute]) -> str:
-        """Render planned routes as BIRD configuration text."""
+        """Render planned routes as stable BIRD configuration text."""
 
         ipv4_routes = sorted(
             (route for route in routes if route.family == 4),
@@ -69,11 +69,7 @@ class BirdExporter:
         ]
 
         for route in ipv4_routes:
-            lines.append(
-                f"    route {route.prefix} blackhole; "
-                f"# confidence={route.confidence} "
-                f"source_ips={route.source_ips}"
-            )
+            lines.append(f"    route {route.prefix} blackhole;")
 
         lines.extend(
             [
@@ -86,11 +82,7 @@ class BirdExporter:
         )
 
         for route in ipv6_routes:
-            lines.append(
-                f"    route {route.prefix} blackhole; "
-                f"# confidence={route.confidence} "
-                f"source_ips={route.source_ips}"
-            )
+            lines.append(f"    route {route.prefix} blackhole;")
 
         lines.extend(["}", ""])
 
