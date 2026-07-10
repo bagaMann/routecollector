@@ -1,0 +1,32 @@
+[Unit]
+Description=RouteCollector BGP Route Intelligence Daemon
+Documentation=https://github.com/bagamann/routecollector
+Wants=network-online.target
+After=network-online.target bird.service
+Requires=bird.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+WorkingDirectory=/root/routecollector
+
+ExecStart=/root/routecollector/.venv/bin/routecollector daemon \
+    --interval 1800 \
+    --service youtube \
+    --lock-file /root/routecollector/state/routecollector.lock \
+    --min-confidence-ipv4 10 \
+    --min-confidence-ipv6 10
+
+Restart=on-failure
+RestartSec=15
+
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
