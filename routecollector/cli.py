@@ -46,7 +46,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("version", help="Show version information")
     subparsers.add_parser("status", help="Show application status")
     subparsers.add_parser("init", help="Initialize RouteCollector state")
-    subparsers.add_parser("sync", help="Sync service configuration into database")
+    subparsers.add_parser(
+        "sync",
+        help="Sync service configuration into database",
+    )
 
     resolve_parser = subparsers.add_parser(
         "resolve",
@@ -63,16 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
         "plan",
         help="Build route plan from statistics",
     )
-    plan_parser.add_argument(
-        "--min-confidence-ipv4",
-        type=int,
-        default=10,
-    )
-    plan_parser.add_argument(
-        "--min-confidence-ipv6",
-        type=int,
-        default=10,
-    )
+    add_confidence_arguments(plan_parser)
 
     subparsers.add_parser(
         "stats",
@@ -83,16 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
         "export",
         help="Export route plan to BIRD",
     )
-    export_parser.add_argument(
-        "--min-confidence-ipv4",
-        type=int,
-        default=10,
-    )
-    export_parser.add_argument(
-        "--min-confidence-ipv6",
-        type=int,
-        default=10,
-    )
+    add_confidence_arguments(export_parser)
 
     subparsers.add_parser(
         "bird-check",
@@ -117,18 +102,26 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional service name",
     )
-    run_once_parser.add_argument(
+    add_confidence_arguments(run_once_parser)
+
+    return parser
+
+
+def add_confidence_arguments(
+    parser: argparse.ArgumentParser,
+) -> None:
+    """Add route confidence options to a command parser."""
+
+    parser.add_argument(
         "--min-confidence-ipv4",
         type=int,
         default=10,
     )
-    run_once_parser.add_argument(
+    parser.add_argument(
         "--min-confidence-ipv6",
         type=int,
         default=10,
     )
-
-    return parser
 
 
 def get_app(config_path: Path) -> Application:
@@ -183,17 +176,15 @@ def command_init(config_path: Path) -> int:
 
 
 def command_sync(config_path: Path) -> int:
-    """Sync service configuration."""
+    """Synchronize service configuration."""
 
     app = get_app(config_path)
-
     assert app.repository is not None
 
-    sync = ServiceConfigSync(
+    services, domains = ServiceConfigSync(
         repository=app.repository,
         services_dir=DEFAULT_SERVICES_DIR,
-    )
-    services, domains = sync.sync()
+    ).sync()
 
     print("Service configuration synced")
     print(f"Services: {services}")
@@ -209,17 +200,33 @@ def command_resolve(
     """Resolve configured domains."""
 
     app = get_app(config_path)
-
     assert app.repository is not None
 
-    resolver = DnsResolver(app.repository)
-    domains, observations = resolver.resolve_all(service_name)
+    domains, observations = DnsResolver(
+        app.repository
+    ).resolve_all(service_name)
 
     print("DNS resolve completed")
     print(f"Domains: {domains}")
     print(f"Observations: {observations}")
 
     return 0
+
+
+def build_route_plan(
+    app: Application,
+    min_confidence_ipv4: int,
+    min_confidence_ipv6: int,
+):
+    """Build a route plan for an initialized application."""
+
+    assert app.repository is not None
+
+    return RoutePlanner(
+        repository=app.repository,
+        min_confidence_ipv4=min_confidence_ipv4,
+        min_confidence_ipv6=min_confidence_ipv6,
+    ).build_plan()
 
 
 def command_plan(
@@ -230,15 +237,11 @@ def command_plan(
     """Build and print route plan."""
 
     app = get_app(config_path)
-
-    assert app.repository is not None
-
-    planner = RoutePlanner(
-        repository=app.repository,
-        min_confidence_ipv4=min_confidence_ipv4,
-        min_confidence_ipv6=min_confidence_ipv6,
+    routes = build_route_plan(
+        app,
+        min_confidence_ipv4,
+        min_confidence_ipv6,
     )
-    routes = planner.build_plan()
 
     print("Route plan")
     print(f"Prefixes: {len(routes)}")
@@ -259,7 +262,6 @@ def command_stats(config_path: Path) -> int:
     """Rebuild and print route statistics."""
 
     app = get_app(config_path)
-
     assert app.repository is not None
 
     count = app.repository.rebuild_route_stats()
@@ -286,30 +288,26 @@ def command_export(
     min_confidence_ipv4: int,
     min_confidence_ipv6: int,
 ) -> int:
-    """Export route plan to BIRD config file."""
+    """Export route plan to BIRD configuration."""
 
     app = get_app(config_path)
-
-    assert app.repository is not None
-
-    planner = RoutePlanner(
-        repository=app.repository,
-        min_confidence_ipv4=min_confidence_ipv4,
-        min_confidence_ipv6=min_confidence_ipv6,
+    routes = build_route_plan(
+        app,
+        min_confidence_ipv4,
+        min_confidence_ipv6,
     )
-    routes = planner.build_plan()
 
     if not routes:
         raise RuntimeError(
             "Route plan is empty; refusing to generate BIRD configuration"
         )
 
-    exporter = BirdExporter(DEFAULT_BIRD_OUTPUT)
-    output_file = exporter.export(routes)
+    result = BirdExporter(DEFAULT_BIRD_OUTPUT).export(routes)
 
-    print("BIRD config exported")
-    print(f"File: {output_file}")
-    print(f"Prefixes: {len(routes)}")
+    print("BIRD config export completed")
+    print(f"File: {result.path}")
+    print(f"Prefixes: {result.route_count}")
+    print(f"Changed: {'yes' if result.changed else 'no'}")
 
     return 0
 
@@ -317,28 +315,22 @@ def command_export(
 def command_bird_check() -> int:
     """Check BIRD configuration."""
 
-    output = BirdControl().configure_check()
-    print(output)
-
+    print(BirdControl().configure_check())
     return 0
 
 
 def command_install_bird_config() -> int:
-    """Install generated BIRD config."""
+    """Install generated BIRD configuration."""
 
-    installer = BirdConfigInstaller(
+    result = BirdConfigInstaller(
         source_file=DEFAULT_BIRD_OUTPUT,
         target_file=DEFAULT_BIRD_TARGET,
         main_config=DEFAULT_BIRD_MAIN_CONFIG,
-    )
+    ).install()
 
-    target = installer.install()
-
-    print("BIRD config installed")
-    print(f"File: {target}")
-    print()
-    print("Required include line:")
-    print(f'include "{target}";')
+    print("BIRD config installation completed")
+    print(f"File: {result.path}")
+    print(f"Changed: {'yes' if result.changed else 'no'}")
 
     return 0
 
@@ -363,10 +355,9 @@ def command_run_once(
     """Execute complete update cycle without reloading BIRD."""
 
     app = get_app(config_path)
-
     assert app.repository is not None
 
-    workflow = RunOnceWorkflow(
+    result = RunOnceWorkflow(
         repository=app.repository,
         services_dir=DEFAULT_SERVICES_DIR,
         generated_config=DEFAULT_BIRD_OUTPUT,
@@ -374,9 +365,7 @@ def command_run_once(
         main_bird_config=DEFAULT_BIRD_MAIN_CONFIG,
         min_confidence_ipv4=min_confidence_ipv4,
         min_confidence_ipv6=min_confidence_ipv6,
-    )
-
-    result = workflow.run(service_name)
+    ).run(service_name)
 
     print("RouteCollector cycle completed")
     print()
@@ -387,11 +376,23 @@ def command_run_once(
     print(f"Route statistics:    {result.route_stats_built}")
     print(f"Planned routes:      {result.planned_routes}")
     print(f"Generated config:    {result.generated_config}")
+    print(
+        "Generated changed:   "
+        f"{'yes' if result.generated_changed else 'no'}"
+    )
     print(f"Installed config:    {result.installed_config}")
+    print(
+        "Installed changed:   "
+        f"{'yes' if result.installed_changed else 'no'}"
+    )
     print()
     print(result.bird_check_output)
     print()
-    print("BIRD configuration was not reloaded.")
+
+    if result.installed_changed:
+        print("BIRD configuration changed; reload is required.")
+    else:
+        print("No BIRD route changes detected; reload is not required.")
 
     return 0
 
@@ -415,10 +416,7 @@ def main() -> int:
         return command_sync(args.config)
 
     if args.command == "resolve":
-        return command_resolve(
-            args.config,
-            args.service,
-        )
+        return command_resolve(args.config, args.service)
 
     if args.command == "plan":
         return command_plan(

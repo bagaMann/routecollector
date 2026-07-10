@@ -1,8 +1,9 @@
 """
 Single-run RouteCollector workflow.
 
-This module executes a complete data collection and route generation cycle
-without applying the generated BIRD configuration.
+This module executes a complete data collection and route generation cycle.
+It installs a generated BIRD configuration only when its content changed,
+checks the resulting BIRD configuration, but does not reload BIRD.
 """
 
 from __future__ import annotations
@@ -33,7 +34,9 @@ class RunOnceResult:
     route_stats_built: int
     planned_routes: int
     generated_config: Path
+    generated_changed: bool
     installed_config: Path
+    installed_changed: bool
     bird_check_output: str
 
 
@@ -59,7 +62,7 @@ class RunOnceWorkflow:
         self._min_confidence_ipv6 = min_confidence_ipv6
 
     def run(self, service_name: str | None = None) -> RunOnceResult:
-        """Execute complete update cycle without reloading BIRD."""
+        """Execute a complete update cycle without reloading BIRD."""
 
         sync = ServiceConfigSync(
             repository=self._repository,
@@ -68,7 +71,9 @@ class RunOnceWorkflow:
         services_synced, domains_synced = sync.sync()
 
         resolver = DnsResolver(self._repository)
-        domains_resolved, observations_stored = resolver.resolve_all(service_name)
+        domains_resolved, observations_stored = resolver.resolve_all(
+            service_name
+        )
 
         route_stats_built = self._repository.rebuild_route_stats()
 
@@ -84,15 +89,15 @@ class RunOnceWorkflow:
                 "Route plan is empty; refusing to replace BIRD configuration"
             )
 
-        exporter = BirdExporter(self._generated_config)
-        generated_config = exporter.export(routes)
+        export_result = BirdExporter(
+            self._generated_config
+        ).export(routes)
 
-        installer = BirdConfigInstaller(
-            source_file=generated_config,
+        install_result = BirdConfigInstaller(
+            source_file=export_result.path,
             target_file=self._installed_config,
             main_config=self._main_bird_config,
-        )
-        installed_config = installer.install()
+        ).install()
 
         bird_check_output = BirdControl().configure_check()
 
@@ -103,7 +108,9 @@ class RunOnceWorkflow:
             observations_stored=observations_stored,
             route_stats_built=route_stats_built,
             planned_routes=len(routes),
-            generated_config=generated_config,
-            installed_config=installed_config,
+            generated_config=export_result.path,
+            generated_changed=export_result.changed,
+            installed_config=install_result.path,
+            installed_changed=install_result.changed,
             bird_check_output=bird_check_output,
         )

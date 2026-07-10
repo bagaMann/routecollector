@@ -1,63 +1,84 @@
 """
-BIRD control helpers.
+BIRD configuration installation and control helpers.
 """
 
 from __future__ import annotations
 
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 
 class BirdControlError(RuntimeError):
-    """BIRD control command error."""
+    """BIRD control or configuration installation error."""
+
+
+@dataclass(slots=True, frozen=True)
+class BirdInstallResult:
+    """Result of installing a generated BIRD configuration."""
+
+    path: Path
+    changed: bool
 
 
 class BirdControl:
-    """Run safe BIRD control commands."""
+    """Run BIRD control commands."""
 
-    def __init__(self, birdc_bin: str = "birdc") -> None:
+    def __init__(
+        self,
+        birdc_bin: str = "birdc",
+        timeout: float = 10.0,
+    ) -> None:
         self._birdc_bin = birdc_bin
+        self._timeout = timeout
 
     def configure_check(self) -> str:
-        """Check BIRD configuration without applying it."""
+        """Check the active BIRD configuration without applying it."""
 
-        result = subprocess.run(
-            [self._birdc_bin, "configure", "check"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-
-        output = (result.stdout + result.stderr).strip()
-
-        if result.returncode != 0:
-            raise BirdControlError(output)
-
-        return output
+        return self._run(["configure", "check"])
 
     def configure(self) -> str:
-        """Apply BIRD configuration."""
+        """Apply the active BIRD configuration."""
 
-        result = subprocess.run(
-            [self._birdc_bin, "configure"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
+        return self._run(["configure"])
+
+    def _run(self, arguments: list[str]) -> str:
+        """Execute birdc and return combined output."""
+
+        try:
+            result = subprocess.run(
+                [self._birdc_bin, *arguments],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=self._timeout,
+            )
+        except FileNotFoundError as exc:
+            raise BirdControlError(
+                f"BIRD client not found: {self._birdc_bin}"
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise BirdControlError(
+                f"BIRD command timed out after {self._timeout} seconds"
+            ) from exc
+
+        output = "\n".join(
+            part.strip()
+            for part in (result.stdout, result.stderr)
+            if part.strip()
         )
 
-        output = (result.stdout + result.stderr).strip()
-
         if result.returncode != 0:
-            raise BirdControlError(output)
+            raise BirdControlError(
+                output or f"birdc exited with status {result.returncode}"
+            )
 
         return output
 
 
 class BirdConfigInstaller:
-    """Install generated RouteCollector BIRD config."""
+    """Install a generated RouteCollector configuration for BIRD."""
 
     def __init__(
         self,
@@ -69,19 +90,62 @@ class BirdConfigInstaller:
         self._target_file = target_file
         self._main_config = main_config
 
-    def install(self) -> Path:
-        """Copy generated config into BIRD config directory."""
+    def install(self) -> BirdInstallResult:
+        """Install config only when source and target differ."""
 
-        if not self._source_file.exists():
-            raise BirdControlError(f"Source config not found: {self._source_file}")
+        self._validate_paths()
 
-        if not self._main_config.exists():
-            raise BirdControlError(f"BIRD main config not found: {self._main_config}")
+        if self._files_are_equal():
+            return BirdInstallResult(
+                path=self._target_file,
+                changed=False,
+            )
 
         self._target_file.parent.mkdir(parents=True, exist_ok=True)
 
-        tmp_file = self._target_file.with_suffix(self._target_file.suffix + ".tmp")
-        shutil.copyfile(self._source_file, tmp_file)
-        tmp_file.replace(self._target_file)
+        temporary_file = self._target_file.with_suffix(
+            self._target_file.suffix + ".tmp"
+        )
 
-        return self._target_file
+        try:
+            shutil.copyfile(self._source_file, temporary_file)
+            temporary_file.replace(self._target_file)
+        except OSError as exc:
+            temporary_file.unlink(missing_ok=True)
+            raise BirdControlError(
+                f"Unable to install BIRD configuration: {exc}"
+            ) from exc
+
+        return BirdInstallResult(
+            path=self._target_file,
+            changed=True,
+        )
+
+    def _validate_paths(self) -> None:
+        """Validate source and main BIRD configuration paths."""
+
+        if not self._source_file.is_file():
+            raise BirdControlError(
+                f"Generated BIRD config not found: {self._source_file}"
+            )
+
+        if not self._main_config.is_file():
+            raise BirdControlError(
+                f"BIRD main config not found: {self._main_config}"
+            )
+
+    def _files_are_equal(self) -> bool:
+        """Return whether generated and installed files are identical."""
+
+        if not self._target_file.is_file():
+            return False
+
+        try:
+            return (
+                self._source_file.read_bytes()
+                == self._target_file.read_bytes()
+            )
+        except OSError as exc:
+            raise BirdControlError(
+                f"Unable to compare BIRD configurations: {exc}"
+            ) from exc
