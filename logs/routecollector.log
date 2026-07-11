@@ -136,3 +136,4 @@
 2026-07-11 15:23:11,151 | INFO     | routecollector | Application initialized
 2026-07-11 15:25:15,114 | INFO     | routecollector | Application initialized
 2026-07-11 15:33:40,663 | INFO     | routecollector | Cycle completed: services=3 domains=232 resolved=485 observations=6279 route_stats=97 routes=61 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 16:05:05,871 | INFO     | routecollector | Cycle completed: services=3 domains=232 resolved=485 observations=6264 route_stats=98 routes=61 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
