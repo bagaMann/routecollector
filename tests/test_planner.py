@@ -34,6 +34,8 @@ def make_stat(
     confidence: int,
     source_ips: int = 1,
     total_hits: int = 1,
+    unique_domains: int = 1,
+    unique_resolvers: int = 1,
     last_seen: datetime | None = NOW,
 ) -> RouteStat:
     """Build a RouteStat for tests."""
@@ -42,6 +44,8 @@ def make_stat(
         prefix=prefix,
         family=family,
         source_ips=source_ips,
+        unique_domains=unique_domains,
+        unique_resolvers=unique_resolvers,
         total_hits=total_hits,
         confidence=confidence,
         first_seen="2026-07-01 00:00:00",
@@ -208,6 +212,8 @@ def test_planner_excludes_route_with_invalid_last_seen() -> None:
         confidence=100,
         first_seen="2026-07-01 00:00:00",
         last_seen="not-a-date",
+        unique_domains=1,
+        unique_resolvers=1,
     )
 
     planner = RoutePlanner(

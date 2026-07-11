@@ -76,3 +76,18 @@
 2026-07-11 08:45:43,940 | INFO     | routecollector | Application initialized
 2026-07-11 08:45:43,941 | INFO     | routecollector | RouteCollector daemon started with interval=1800 seconds
 2026-07-11 08:46:13,574 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2852 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 09:16:44,237 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2839 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 09:27:02,510 | INFO     | routecollector | Application initialized
+2026-07-11 09:27:10,240 | INFO     | routecollector | Application initialized
+2026-07-11 09:39:33,312 | INFO     | routecollector | Application initialized
+2026-07-11 09:39:33,338 | INFO     | routecollector | Database initialized: state/state.db
+2026-07-11 09:47:16,075 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2856 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 10:01:53,872 | INFO     | routecollector | Application initialized
+2026-07-11 10:17:45,863 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2840 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 10:32:24,388 | INFO     | routecollector | Received signal 15, stopping daemon
+2026-07-11 10:32:24,947 | INFO     | routecollector | RouteCollector daemon stopped
+2026-07-11 10:32:25,067 | INFO     | routecollector | Application initialized
+2026-07-11 10:32:25,067 | INFO     | routecollector | RouteCollector daemon started with interval=1800 seconds
+2026-07-11 10:32:29,264 | INFO     | routecollector | Application initialized
+2026-07-11 10:32:56,859 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2850 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 10:44:31,376 | INFO     | routecollector | Application initialized

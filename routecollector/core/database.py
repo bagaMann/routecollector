@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS route_stats (
     prefix TEXT NOT NULL UNIQUE,
     family INTEGER NOT NULL,
     source_ips INTEGER NOT NULL,
+    unique_domains INTEGER NOT NULL DEFAULT 0,
+    unique_resolvers INTEGER NOT NULL DEFAULT 0,
     total_hits INTEGER NOT NULL,
     confidence INTEGER NOT NULL,
     first_seen TEXT,
@@ -59,13 +61,39 @@ CREATE TABLE IF NOT EXISTS route_stats (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_domains_service_id ON domains(service_id);
-CREATE INDEX IF NOT EXISTS idx_observations_ip ON observations(ip);
-CREATE INDEX IF NOT EXISTS idx_observations_last_seen ON observations(last_seen);
-CREATE INDEX IF NOT EXISTS idx_observations_source ON observations(source);
-CREATE INDEX IF NOT EXISTS idx_route_stats_family ON route_stats(family);
-CREATE INDEX IF NOT EXISTS idx_route_stats_confidence ON route_stats(confidence);
+CREATE INDEX IF NOT EXISTS idx_domains_service_id
+    ON domains(service_id);
+
+CREATE INDEX IF NOT EXISTS idx_observations_ip
+    ON observations(ip);
+
+CREATE INDEX IF NOT EXISTS idx_observations_last_seen
+    ON observations(last_seen);
+
+CREATE INDEX IF NOT EXISTS idx_observations_source
+    ON observations(source);
+
+CREATE INDEX IF NOT EXISTS idx_route_stats_family
+    ON route_stats(family);
+
+CREATE INDEX IF NOT EXISTS idx_route_stats_confidence
+    ON route_stats(confidence);
+
+CREATE INDEX IF NOT EXISTS idx_route_stats_last_seen
+    ON route_stats(last_seen);
 """
+
+
+ROUTE_STATS_MIGRATIONS = {
+    "unique_domains": (
+        "ALTER TABLE route_stats "
+        "ADD COLUMN unique_domains INTEGER NOT NULL DEFAULT 0"
+    ),
+    "unique_resolvers": (
+        "ALTER TABLE route_stats "
+        "ADD COLUMN unique_resolvers INTEGER NOT NULL DEFAULT 0"
+    ),
+}
 
 
 class DatabaseError(RuntimeError):
@@ -79,15 +107,18 @@ class Database:
         self.path = path
 
     def initialize(self) -> None:
-        """Create database directory and schema."""
+        """Create database directory, schema and required migrations."""
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             with self.connection() as conn:
                 conn.executescript(SCHEMA_SQL)
+                self._migrate_route_stats(conn)
         except sqlite3.Error as exc:
-            raise DatabaseError(f"Failed to initialize database: {exc}") from exc
+            raise DatabaseError(
+                f"Failed to initialize database: {exc}"
+            ) from exc
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:
@@ -105,3 +136,18 @@ class Database:
             raise
         finally:
             conn.close()
+
+    @staticmethod
+    def _migrate_route_stats(conn: sqlite3.Connection) -> None:
+        """Add missing route_stats columns to an existing database."""
+
+        columns = {
+            str(row["name"])
+            for row in conn.execute(
+                "PRAGMA table_info(route_stats)"
+            ).fetchall()
+        }
+
+        for column_name, migration_sql in ROUTE_STATS_MIGRATIONS.items():
+            if column_name not in columns:
+                conn.execute(migration_sql)

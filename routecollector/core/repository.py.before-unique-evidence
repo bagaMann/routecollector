@@ -55,8 +55,6 @@ class RouteStat:
     prefix: str
     family: int
     source_ips: int
-    unique_domains: int
-    unique_resolvers: int
     total_hits: int
     confidence: int
     first_seen: str | None
@@ -348,10 +346,12 @@ class Repository:
     ) -> int:
         """Rebuild normalized route statistics from observations."""
 
+        observations = self.list_observations()
+
         calculated_stats = RouteStatisticsBuilder(
             ipv4_prefix=ipv4_prefix,
             ipv6_prefix=ipv6_prefix,
-        ).build(self.list_observations())
+        ).build(observations)
 
         with self._database.connection() as conn:
             conn.execute("DELETE FROM route_stats")
@@ -363,22 +363,18 @@ class Repository:
                         prefix,
                         family,
                         source_ips,
-                        unique_domains,
-                        unique_resolvers,
                         total_hits,
                         confidence,
                         first_seen,
                         last_seen
                     )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
                         stat.prefix,
                         stat.family,
                         stat.source_ips,
-                        stat.unique_domains,
-                        stat.unique_resolvers,
                         stat.total_hits,
                         stat.confidence,
                         stat.first_seen,
@@ -400,8 +396,6 @@ class Repository:
                     prefix,
                     family,
                     source_ips,
-                    unique_domains,
-                    unique_resolvers,
                     total_hits,
                     confidence,
                     first_seen,
@@ -416,8 +410,6 @@ class Repository:
                     prefix=str(row["prefix"]),
                     family=int(row["family"]),
                     source_ips=int(row["source_ips"]),
-                    unique_domains=int(row["unique_domains"]),
-                    unique_resolvers=int(row["unique_resolvers"]),
                     total_hits=int(row["total_hits"]),
                     confidence=int(row["confidence"]),
                     first_seen=row["first_seen"],
