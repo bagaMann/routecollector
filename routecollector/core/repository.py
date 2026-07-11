@@ -38,6 +38,7 @@ class Observation:
 
     id: int
     domain_id: int | None
+    domain_source: str | None
     ip: str
     source: str
     dns_server: str | None
@@ -57,6 +58,8 @@ class RouteStat:
     source_ips: int
     unique_domains: int
     unique_resolvers: int
+    source_count: int
+    source_trust: int
     total_hits: int
     confidence: int
     first_seen: str | None
@@ -236,12 +239,7 @@ class Repository:
         ttl: int | None,
         confidence: int = 1,
     ) -> int:
-        """Insert or update a DNS observation.
-
-        Hits increase on every observation. The legacy observation confidence
-        counter increases at most once per configured interval. Route
-        publication confidence is calculated separately by RouteScorer.
-        """
+        """Insert or update a DNS observation."""
 
         with self._database.connection() as conn:
             existing = conn.execute(
@@ -263,14 +261,7 @@ class Repository:
                         (domain_id, ip, source, dns_server, ttl, confidence)
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (
-                        domain_id,
-                        ip,
-                        source,
-                        dns_server,
-                        ttl,
-                        confidence,
-                    ),
+                    (domain_id, ip, source, dns_server, ttl, confidence),
                 )
 
                 return int(cursor.lastrowid)
@@ -294,34 +285,32 @@ class Repository:
                     confidence = confidence + ?
                 WHERE id = ?
                 """,
-                (
-                    ttl,
-                    confidence_increment,
-                    int(existing["id"]),
-                ),
+                (ttl, confidence_increment, int(existing["id"])),
             )
 
             return int(existing["id"])
 
     def list_observations(self) -> list[Observation]:
-        """Return all observations."""
+        """Return all observations with domain source provenance."""
 
         with self._database.connection() as conn:
             rows = conn.execute(
                 """
                 SELECT
-                    id,
-                    domain_id,
-                    ip,
-                    source,
-                    dns_server,
-                    hits,
-                    ttl,
-                    confidence,
-                    first_seen,
-                    last_seen
-                FROM observations
-                ORDER BY last_seen DESC
+                    o.id,
+                    o.domain_id,
+                    d.source AS domain_source,
+                    o.ip,
+                    o.source,
+                    o.dns_server,
+                    o.hits,
+                    o.ttl,
+                    o.confidence,
+                    o.first_seen,
+                    o.last_seen
+                FROM observations o
+                LEFT JOIN domains d ON d.id = o.domain_id
+                ORDER BY o.last_seen DESC
                 """
             ).fetchall()
 
@@ -329,6 +318,7 @@ class Repository:
                 Observation(
                     id=int(row["id"]),
                     domain_id=row["domain_id"],
+                    domain_source=row["domain_source"],
                     ip=str(row["ip"]),
                     source=str(row["source"]),
                     dns_server=row["dns_server"],
@@ -365,12 +355,14 @@ class Repository:
                         source_ips,
                         unique_domains,
                         unique_resolvers,
+                        source_count,
+                        source_trust,
                         total_hits,
                         confidence,
                         first_seen,
                         last_seen
                     )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -379,6 +371,8 @@ class Repository:
                         stat.source_ips,
                         stat.unique_domains,
                         stat.unique_resolvers,
+                        stat.source_count,
+                        stat.source_trust,
                         stat.total_hits,
                         stat.confidence,
                         stat.first_seen,
@@ -402,6 +396,8 @@ class Repository:
                     source_ips,
                     unique_domains,
                     unique_resolvers,
+                    source_count,
+                    source_trust,
                     total_hits,
                     confidence,
                     first_seen,
@@ -418,6 +414,8 @@ class Repository:
                     source_ips=int(row["source_ips"]),
                     unique_domains=int(row["unique_domains"]),
                     unique_resolvers=int(row["unique_resolvers"]),
+                    source_count=int(row["source_count"]),
+                    source_trust=int(row["source_trust"]),
                     total_hits=int(row["total_hits"]),
                     confidence=int(row["confidence"]),
                     first_seen=row["first_seen"],

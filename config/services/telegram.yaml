@@ -1,0 +1,25 @@
+name: telegram
+description: Telegram messaging platform
+enabled: true
+
+sources:
+  - manual
+  - domain-list-community
+
+domain_list_community:
+  lists:
+    - telegram
+
+domains:
+  - telegram.org
+  - telegram.me
+  - t.me
+  - telegra.ph
+  - telegram.dog
+  - telegram.space
+  - telesco.pe
+  - tg.dev
+  - fragment.com
+  - graph.org
+  - contest.com
+  - quiz.directory

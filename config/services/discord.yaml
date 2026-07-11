@@ -1,0 +1,22 @@
+name: discord
+description: Discord communication platform
+enabled: true
+
+sources:
+  - manual
+  - domain-list-community
+
+domain_list_community:
+  lists:
+    - discord
+
+domains:
+  - discord.com
+  - discord.gg
+  - discordapp.com
+  - discordapp.net
+  - discord.media
+  - discordcdn.com
+  - cdn.discordapp.com
+  - media.discordapp.net
+  - gateway.discord.gg

@@ -24,17 +24,20 @@ class FakeRepository:
         return 3
 
 
-class FakeServiceConfigSync:
-    """Fake service configuration synchronization."""
+class FakeServiceSourceSync:
+    """Fake service source synchronization."""
 
     def __init__(self, **_: Any) -> None:
         pass
 
-    def sync(self) -> tuple[int, int]:
+    def sync(self) -> SimpleNamespace:
         """Return synchronized service and domain counts."""
 
-        return 1, 189
-
+        return SimpleNamespace(
+            service_count=1,
+            domain_count=189,
+            services=(),
+        )
 
 class FakeDnsResolver:
     """Fake DNS resolver."""
@@ -78,8 +81,8 @@ def patch_common_components(
 
     monkeypatch.setattr(
         workflow_module,
-        "ServiceConfigSync",
-        FakeServiceConfigSync,
+        "ServiceSourceSync",
+        FakeServiceSourceSync,
     )
     monkeypatch.setattr(
         workflow_module,

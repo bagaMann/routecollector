@@ -72,11 +72,6 @@ class RouteStatisticsBuilder:
             except ValueError:
                 continue
 
-            # Never publish loopback, private, link-local, multicast,
-            # reserved, unspecified or other non-globally-routable addresses.
-            if not address.is_global:
-                continue
-
             prefix_length = (
                 self._ipv4_prefix
                 if address.version == 4

@@ -10,6 +10,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from routecollector.core.repository import Repository
+from routecollector.policy.publish_score import (
+    PublishScoreInput,
+    PublishScorePolicy,
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -19,7 +23,12 @@ class PlannedRoute:
     prefix: str
     family: int
     source_ips: int
+    unique_domains: int
+    unique_resolvers: int
+    source_count: int
+    source_trust: int
     confidence: int
+    publish_score: int
 
 
 class RoutePlanner:
@@ -32,21 +41,29 @@ class RoutePlanner:
         min_confidence_ipv6: int = 10,
         max_age_days: int = 30,
         now: datetime | None = None,
+        publish_score_policy: PublishScorePolicy | None = None,
     ) -> None:
-        if min_confidence_ipv4 < 0:
-            raise ValueError("IPv4 confidence threshold cannot be negative")
+        if not 0 <= min_confidence_ipv4 <= 100:
+            raise ValueError(
+                "IPv4 publication threshold must be between 0 and 100"
+            )
 
-        if min_confidence_ipv6 < 0:
-            raise ValueError("IPv6 confidence threshold cannot be negative")
+        if not 0 <= min_confidence_ipv6 <= 100:
+            raise ValueError(
+                "IPv6 publication threshold must be between 0 and 100"
+            )
 
         if max_age_days <= 0:
             raise ValueError("Route maximum age must be greater than zero")
 
         self._repository = repository
-        self._min_confidence_ipv4 = min_confidence_ipv4
-        self._min_confidence_ipv6 = min_confidence_ipv6
+        self._min_publish_score_ipv4 = min_confidence_ipv4
+        self._min_publish_score_ipv6 = min_confidence_ipv6
         self._max_age = timedelta(days=max_age_days)
         self._now = now
+        self._publish_score_policy = (
+            publish_score_policy or PublishScorePolicy()
+        )
 
     def build_plan(self) -> list[PlannedRoute]:
         """Build publishable route prefixes."""
@@ -69,13 +86,21 @@ class RoutePlanner:
             if current_time - last_seen > self._max_age:
                 continue
 
-            minimum_confidence = (
-                self._min_confidence_ipv4
-                if stat.family == 4
-                else self._min_confidence_ipv6
+            publish_score = self._publish_score_policy.calculate(
+                PublishScoreInput(
+                    confidence=stat.confidence,
+                    source_trust=stat.source_trust,
+                    source_count=stat.source_count,
+                )
             )
 
-            if stat.confidence < minimum_confidence:
+            minimum_publish_score = (
+                self._min_publish_score_ipv4
+                if stat.family == 4
+                else self._min_publish_score_ipv6
+            )
+
+            if publish_score.total < minimum_publish_score:
                 continue
 
             routes.append(
@@ -83,7 +108,12 @@ class RoutePlanner:
                     prefix=stat.prefix,
                     family=stat.family,
                     source_ips=stat.source_ips,
+                    unique_domains=stat.unique_domains,
+                    unique_resolvers=stat.unique_resolvers,
+                    source_count=stat.source_count,
+                    source_trust=stat.source_trust,
                     confidence=stat.confidence,
+                    publish_score=publish_score.total,
                 )
             )
 

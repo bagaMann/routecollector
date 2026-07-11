@@ -31,8 +31,6 @@ DEFAULT_BIRD_MAIN_CONFIG = Path("/etc/bird/bird.conf")
 DEFAULT_DAEMON_LOCK = Path("state/routecollector.lock")
 DEFAULT_DAEMON_INTERVAL = 1800
 DEFAULT_MAX_AGE_DAYS = 30
-DEFAULT_MIN_PUBLISH_SCORE_IPV4 = 50
-DEFAULT_MIN_PUBLISH_SCORE_IPV6 = 50
 
 
 def add_route_policy_arguments(
@@ -43,14 +41,14 @@ def add_route_policy_arguments(
     parser.add_argument(
         "--min-confidence-ipv4",
         type=int,
-        default=DEFAULT_MIN_PUBLISH_SCORE_IPV4,
-        help="Minimum publish score for IPv4 routes",
+        default=10,
+        help="Minimum confidence for IPv4 routes",
     )
     parser.add_argument(
         "--min-confidence-ipv6",
         type=int,
-        default=DEFAULT_MIN_PUBLISH_SCORE_IPV6,
-        help="Minimum publish score for IPv6 routes",
+        default=10,
+        help="Minimum confidence for IPv6 routes",
     )
     parser.add_argument(
         "--max-age-days",
@@ -333,10 +331,7 @@ def command_plan(
             f"{route.prefix:<24} "
             f"family=IPv{route.family} "
             f"source_ips={route.source_ips:<4} "
-            f"confidence={route.confidence:<3} "
-            f"publish_score={route.publish_score:<3} "
-            f"trust={route.source_trust:<3} "
-            f"sources={route.source_count}"
+            f"confidence={route.confidence}"
         )
 
     return 0

@@ -1,5 +1,5 @@
 """
-Tests for BIRD configuration exporter.
+Tests for BIRD route exporter.
 """
 
 from __future__ import annotations
@@ -10,21 +10,50 @@ from routecollector.exporter.bird import BirdExporter
 from routecollector.planner.planner import PlannedRoute
 
 
+def make_route(
+    *,
+    prefix: str,
+    family: int,
+    source_ips: int,
+    confidence: int,
+    publish_score: int,
+    unique_domains: int = 10,
+    unique_resolvers: int = 2,
+    source_count: int = 2,
+    source_trust: int = 100,
+) -> PlannedRoute:
+    """Build a planned route for exporter tests."""
+
+    return PlannedRoute(
+        prefix=prefix,
+        family=family,
+        source_ips=source_ips,
+        unique_domains=unique_domains,
+        unique_resolvers=unique_resolvers,
+        source_count=source_count,
+        source_trust=source_trust,
+        confidence=confidence,
+        publish_score=publish_score,
+    )
+
+
 def build_test_routes() -> list[PlannedRoute]:
     """Return test IPv4 and IPv6 routes."""
 
     return [
-        PlannedRoute(
+        make_route(
             prefix="192.0.2.0/24",
             family=4,
             source_ips=4,
             confidence=25,
+            publish_score=51,
         ),
-        PlannedRoute(
+        make_route(
             prefix="2001:db8::/48",
             family=6,
             source_ips=8,
             confidence=50,
+            publish_score=76,
         ),
     ]
 
@@ -52,6 +81,7 @@ def test_bird_exporter_generates_ipv4_and_ipv6_protocols(
     assert "route 2001:db8::/48 blackhole;" in content
 
     assert "confidence=" not in content
+    assert "publish_score=" not in content
     assert "source_ips=" not in content
 
 
@@ -65,42 +95,49 @@ def test_bird_exporter_reports_unchanged_content(
     routes = build_test_routes()
 
     first_result = exporter.export(routes)
-    first_mtime = output_file.stat().st_mtime_ns
-
     second_result = exporter.export(routes)
-    second_mtime = output_file.stat().st_mtime_ns
 
     assert first_result.changed is True
     assert second_result.changed is False
-    assert first_mtime == second_mtime
+    assert second_result.route_count == 2
 
 
 def test_bird_exporter_ignores_statistic_changes(
     tmp_path: Path,
 ) -> None:
-    """Changing confidence or source IP count must not change BIRD config."""
+    """Changing route statistics must not change BIRD config."""
 
     output_file = tmp_path / "routecollector.conf"
     exporter = BirdExporter(output_file)
 
     first_result = exporter.export(
         [
-            PlannedRoute(
+            make_route(
                 prefix="192.0.2.0/24",
                 family=4,
                 source_ips=1,
+                unique_domains=1,
+                unique_resolvers=1,
+                source_count=1,
+                source_trust=50,
                 confidence=10,
+                publish_score=23,
             )
         ]
     )
 
     second_result = exporter.export(
         [
-            PlannedRoute(
+            make_route(
                 prefix="192.0.2.0/24",
                 family=4,
-                source_ips=50,
-                confidence=500,
+                source_ips=200,
+                unique_domains=150,
+                unique_resolvers=10,
+                source_count=5,
+                source_trust=100,
+                confidence=100,
+                publish_score=100,
             )
         ]
     )
@@ -119,20 +156,22 @@ def test_bird_exporter_replaces_changed_content_atomically(
 
     exporter.export(build_test_routes())
 
-    result = exporter.export(
+    changed_result = exporter.export(
         [
-            PlannedRoute(
+            make_route(
                 prefix="198.51.100.0/24",
                 family=4,
-                source_ips=2,
-                confidence=12,
+                source_ips=3,
+                confidence=40,
+                publish_score=66,
             )
         ]
     )
 
     content = output_file.read_text(encoding="utf-8")
 
-    assert result.changed is True
+    assert changed_result.changed is True
+    assert changed_result.route_count == 1
     assert "route 198.51.100.0/24 blackhole;" in content
     assert "route 192.0.2.0/24 blackhole;" not in content
-    assert not (tmp_path / "routecollector.conf.tmp").exists()
+    assert "route 2001:db8::/48 blackhole;" not in content

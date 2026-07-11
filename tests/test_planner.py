@@ -33,9 +33,11 @@ def make_stat(
     family: int,
     confidence: int,
     source_ips: int = 1,
-    total_hits: int = 1,
     unique_domains: int = 1,
     unique_resolvers: int = 1,
+    source_count: int = 1,
+    source_trust: int = 100,
+    total_hits: int = 1,
     last_seen: datetime | None = NOW,
 ) -> RouteStat:
     """Build a RouteStat for tests."""
@@ -46,6 +48,8 @@ def make_stat(
         source_ips=source_ips,
         unique_domains=unique_domains,
         unique_resolvers=unique_resolvers,
+        source_count=source_count,
+        source_trust=source_trust,
         total_hits=total_hits,
         confidence=confidence,
         first_seen="2026-07-01 00:00:00",
@@ -57,8 +61,8 @@ def make_stat(
     )
 
 
-def test_planner_filters_routes_by_confidence() -> None:
-    """Routes below configured confidence must be excluded."""
+def test_planner_filters_routes_by_publish_score() -> None:
+    """Routes below the configured publish score must be excluded."""
 
     repository = FakeRepository(
         [
@@ -75,6 +79,8 @@ def test_planner_filters_routes_by_confidence() -> None:
                 source_ips=1,
                 total_hits=2,
                 confidence=2,
+                source_count=0,
+                source_trust=0,
             ),
             make_stat(
                 prefix="2001:db8::/48",
@@ -101,8 +107,8 @@ def test_planner_filters_routes_by_confidence() -> None:
     ]
 
 
-def test_planner_accepts_route_at_exact_threshold() -> None:
-    """A route at the exact confidence threshold must be included."""
+def test_planner_accepts_route_at_exact_publish_threshold() -> None:
+    """A route at the exact publication threshold must be included."""
 
     repository = FakeRepository(
         [
@@ -112,6 +118,8 @@ def test_planner_accepts_route_at_exact_threshold() -> None:
                 source_ips=3,
                 total_hits=10,
                 confidence=10,
+                source_count=0,
+                source_trust=0,
             )
         ]
     )
@@ -127,6 +135,38 @@ def test_planner_accepts_route_at_exact_threshold() -> None:
     assert len(routes) == 1
     assert routes[0].prefix == "203.0.113.0/24"
     assert routes[0].confidence == 10
+    assert routes[0].publish_score == 10
+
+
+def test_planner_calculates_publish_score_components() -> None:
+    """Planner must expose confidence, trust and final publish score."""
+
+    repository = FakeRepository(
+        [
+            make_stat(
+                prefix="192.0.2.0/24",
+                family=4,
+                confidence=50,
+                source_count=2,
+                source_trust=80,
+            )
+        ]
+    )
+
+    routes = RoutePlanner(
+        repository=repository,  # type: ignore[arg-type]
+        min_confidence_ipv4=1,
+        now=NOW,
+    ).build_plan()
+
+    assert len(routes) == 1
+
+    route = routes[0]
+
+    assert route.confidence == 50
+    assert route.source_count == 2
+    assert route.source_trust == 80
+    assert route.publish_score == 72
 
 
 def test_planner_excludes_stale_route() -> None:
@@ -208,12 +248,14 @@ def test_planner_excludes_route_with_invalid_last_seen() -> None:
         prefix="192.0.2.0/24",
         family=4,
         source_ips=1,
+        unique_domains=1,
+        unique_resolvers=1,
+        source_count=1,
+        source_trust=100,
         total_hits=1,
         confidence=100,
         first_seen="2026-07-01 00:00:00",
         last_seen="not-a-date",
-        unique_domains=1,
-        unique_resolvers=1,
     )
 
     planner = RoutePlanner(
@@ -237,14 +279,28 @@ def test_planner_rejects_non_positive_max_age() -> None:
         )
 
 
-def test_planner_rejects_negative_confidence() -> None:
-    """Confidence thresholds cannot be negative."""
+@pytest.mark.parametrize(
+    ("argument", "value"),
+    [
+        ("min_confidence_ipv4", -1),
+        ("min_confidence_ipv4", 101),
+        ("min_confidence_ipv6", -1),
+        ("min_confidence_ipv6", 101),
+    ],
+)
+def test_planner_rejects_invalid_publication_threshold(
+    argument: str,
+    value: int,
+) -> None:
+    """Publication thresholds must remain between zero and one hundred."""
+
+    arguments = {
+        "repository": FakeRepository([]),  # type: ignore[arg-type]
+        argument: value,
+    }
 
     with pytest.raises(
         ValueError,
-        match="cannot be negative",
+        match="between 0 and 100",
     ):
-        RoutePlanner(
-            repository=FakeRepository([]),  # type: ignore[arg-type]
-            min_confidence_ipv4=-1,
-        )
+        RoutePlanner(**arguments)

@@ -91,3 +91,48 @@
 2026-07-11 10:32:29,264 | INFO     | routecollector | Application initialized
 2026-07-11 10:32:56,859 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2850 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
 2026-07-11 10:44:31,376 | INFO     | routecollector | Application initialized
+2026-07-11 11:03:27,857 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2851 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 11:33:56,095 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2836 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 12:04:27,500 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2860 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 12:15:12,441 | INFO     | routecollector | Application initialized
+2026-07-11 12:34:57,813 | INFO     | routecollector | Cycle completed: services=2 domains=226 resolved=189 observations=2847 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 13:01:45,059 | INFO     | routecollector | Application initialized
+2026-07-11 13:05:21,720 | INFO     | routecollector | Application initialized
+2026-07-11 13:05:21,812 | INFO     | routecollector | Database initialized: state/state.db
+2026-07-11 13:05:29,534 | INFO     | routecollector | Cycle completed: services=2 domains=226 resolved=189 observations=2840 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 13:36:05,349 | INFO     | routecollector | Cycle completed: services=2 domains=226 resolved=189 observations=2857 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 14:06:36,775 | INFO     | routecollector | Cycle completed: services=2 domains=226 resolved=189 observations=2857 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 14:30:10,878 | INFO     | routecollector | Application initialized
+2026-07-11 14:30:18,052 | INFO     | routecollector | Application initialized
+2026-07-11 14:30:26,565 | INFO     | routecollector | Application initialized
+2026-07-11 14:32:05,205 | INFO     | routecollector | Application initialized
+2026-07-11 14:35:49,951 | INFO     | routecollector | Received signal 15, stopping daemon
+2026-07-11 14:35:49,955 | INFO     | routecollector | RouteCollector daemon stopped
+2026-07-11 14:41:16,325 | INFO     | routecollector | Application initialized
+2026-07-11 14:41:45,838 | INFO     | routecollector | Application initialized
+2026-07-11 14:42:28,285 | INFO     | routecollector | Application initialized
+2026-07-11 14:44:25,639 | INFO     | routecollector | Application initialized
+2026-07-11 14:45:10,197 | INFO     | routecollector | Application initialized
+2026-07-11 14:45:10,198 | INFO     | routecollector | RouteCollector daemon started with interval=1800 seconds
+2026-07-11 14:45:35,854 | INFO     | routecollector | Application initialized
+2026-07-11 14:46:11,715 | INFO     | routecollector | Cycle completed: services=2 domains=211 resolved=366 observations=5597 route_stats=90 routes=65 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 14:51:02,872 | INFO     | routecollector | Received signal 15, stopping daemon
+2026-07-11 14:51:03,743 | INFO     | routecollector | RouteCollector daemon stopped
+2026-07-11 14:51:03,880 | INFO     | routecollector | Application initialized
+2026-07-11 14:51:03,881 | INFO     | routecollector | RouteCollector daemon started with interval=1800 seconds
+2026-07-11 14:51:28,609 | INFO     | routecollector | Application initialized
+2026-07-11 14:52:13,242 | INFO     | routecollector | Cycle completed: services=2 domains=211 resolved=431 observations=6108 route_stats=90 routes=65 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 14:58:37,975 | INFO     | routecollector | Application initialized
+2026-07-11 15:00:33,511 | INFO     | routecollector | Received signal 15, stopping daemon
+2026-07-11 15:00:34,291 | INFO     | routecollector | RouteCollector daemon stopped
+2026-07-11 15:00:34,421 | INFO     | routecollector | Application initialized
+2026-07-11 15:00:34,422 | INFO     | routecollector | RouteCollector daemon started with interval=1800 seconds
+2026-07-11 15:01:03,524 | INFO     | routecollector | Application initialized
+2026-07-11 15:02:21,853 | INFO     | routecollector | Cycle completed: services=2 domains=211 resolved=431 observations=6116 route_stats=91 routes=57 generated_changed=True installed_changed=True bird_reloaded=True rollback=False
+2026-07-11 15:05:30,086 | INFO     | routecollector | Application initialized
+2026-07-11 15:08:35,687 | INFO     | routecollector | Application initialized
+2026-07-11 15:10:00,729 | INFO     | routecollector | Application initialized
+2026-07-11 15:22:23,426 | INFO     | routecollector | Application initialized
+2026-07-11 15:23:11,151 | INFO     | routecollector | Application initialized
+2026-07-11 15:25:15,114 | INFO     | routecollector | Application initialized
+2026-07-11 15:33:40,663 | INFO     | routecollector | Cycle completed: services=3 domains=232 resolved=485 observations=6279 route_stats=97 routes=61 generated_changed=False installed_changed=False bird_reloaded=False rollback=False

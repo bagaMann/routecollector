@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS route_stats (
     source_ips INTEGER NOT NULL,
     unique_domains INTEGER NOT NULL DEFAULT 0,
     unique_resolvers INTEGER NOT NULL DEFAULT 0,
+    source_count INTEGER NOT NULL DEFAULT 0,
+    source_trust INTEGER NOT NULL DEFAULT 0,
     total_hits INTEGER NOT NULL,
     confidence INTEGER NOT NULL,
     first_seen TEXT,
@@ -93,7 +95,21 @@ ROUTE_STATS_MIGRATIONS = {
         "ALTER TABLE route_stats "
         "ADD COLUMN unique_resolvers INTEGER NOT NULL DEFAULT 0"
     ),
+    "source_count": (
+        "ALTER TABLE route_stats "
+        "ADD COLUMN source_count INTEGER NOT NULL DEFAULT 0"
+    ),
+    "source_trust": (
+        "ALTER TABLE route_stats "
+        "ADD COLUMN source_trust INTEGER NOT NULL DEFAULT 0"
+    ),
 }
+
+
+POST_MIGRATION_INDEXES_SQL = """
+CREATE INDEX IF NOT EXISTS idx_route_stats_source_trust
+    ON route_stats(source_trust);
+"""
 
 
 class DatabaseError(RuntimeError):
@@ -115,6 +131,7 @@ class Database:
             with self.connection() as conn:
                 conn.executescript(SCHEMA_SQL)
                 self._migrate_route_stats(conn)
+                conn.executescript(POST_MIGRATION_INDEXES_SQL)
         except sqlite3.Error as exc:
             raise DatabaseError(
                 f"Failed to initialize database: {exc}"

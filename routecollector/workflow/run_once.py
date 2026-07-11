@@ -14,9 +14,9 @@ from routecollector.exporter.birdctl import (
     BirdControl,
     BirdControlError,
 )
-from routecollector.parser.service_config import ServiceConfigSync
 from routecollector.planner.planner import RoutePlanner
 from routecollector.resolver.resolver import DnsResolver
+from routecollector.sources.service_source_sync import ServiceSourceSync
 
 
 class RunOnceError(RuntimeError):
@@ -79,10 +79,13 @@ class RunOnceWorkflow:
     ) -> RunOnceResult:
         """Execute a complete update cycle."""
 
-        services_synced, domains_synced = ServiceConfigSync(
+        sync_result = ServiceSourceSync(
             repository=self._repository,
             services_dir=self._services_dir,
         ).sync()
+
+        services_synced = sync_result.service_count
+        domains_synced = sync_result.domain_count
 
         domains_resolved, observations_stored = DnsResolver(
             self._repository
