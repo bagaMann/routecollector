@@ -30,12 +30,13 @@ DEFAULT_BIRD_TARGET = Path("/etc/bird/routecollector.conf")
 DEFAULT_BIRD_MAIN_CONFIG = Path("/etc/bird/bird.conf")
 DEFAULT_DAEMON_LOCK = Path("state/routecollector.lock")
 DEFAULT_DAEMON_INTERVAL = 1800
+DEFAULT_MAX_AGE_DAYS = 30
 
 
-def add_confidence_arguments(
+def add_route_policy_arguments(
     parser: argparse.ArgumentParser,
 ) -> None:
-    """Add route-confidence arguments to a command parser."""
+    """Add route publication policy arguments."""
 
     parser.add_argument(
         "--min-confidence-ipv4",
@@ -48,6 +49,12 @@ def add_confidence_arguments(
         type=int,
         default=10,
         help="Minimum confidence for IPv6 routes",
+    )
+    parser.add_argument(
+        "--max-age-days",
+        type=int,
+        default=DEFAULT_MAX_AGE_DAYS,
+        help="Maximum route age in days",
     )
 
 
@@ -101,7 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
         "plan",
         help="Build route plan from statistics",
     )
-    add_confidence_arguments(plan_parser)
+    add_route_policy_arguments(plan_parser)
 
     subparsers.add_parser(
         "stats",
@@ -112,7 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
         "export",
         help="Export route plan to BIRD",
     )
-    add_confidence_arguments(export_parser)
+    add_route_policy_arguments(export_parser)
 
     subparsers.add_parser(
         "bird-check",
@@ -137,7 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional service name",
     )
-    add_confidence_arguments(run_once_parser)
+    add_route_policy_arguments(run_once_parser)
 
     daemon_parser = subparsers.add_parser(
         "daemon",
@@ -160,7 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_DAEMON_LOCK,
         help="Daemon process lock file",
     )
-    add_confidence_arguments(daemon_parser)
+    add_route_policy_arguments(daemon_parser)
 
     return parser
 
@@ -181,6 +188,7 @@ def build_workflow(
     app: Application,
     min_confidence_ipv4: int,
     min_confidence_ipv6: int,
+    max_age_days: int,
 ) -> RunOnceWorkflow:
     """Build complete RouteCollector workflow."""
 
@@ -195,6 +203,7 @@ def build_workflow(
         main_bird_config=DEFAULT_BIRD_MAIN_CONFIG,
         min_confidence_ipv4=min_confidence_ipv4,
         min_confidence_ipv6=min_confidence_ipv6,
+        max_age_days=max_age_days,
     )
 
 
@@ -202,6 +211,7 @@ def build_route_plan(
     app: Application,
     min_confidence_ipv4: int,
     min_confidence_ipv6: int,
+    max_age_days: int,
 ) -> list[PlannedRoute]:
     """Build route plan for initialized application."""
 
@@ -212,6 +222,7 @@ def build_route_plan(
         repository=app.repository,
         min_confidence_ipv4=min_confidence_ipv4,
         min_confidence_ipv6=min_confidence_ipv6,
+        max_age_days=max_age_days,
     ).build_plan()
 
 
@@ -298,14 +309,17 @@ def command_plan(
     config_path: Path,
     min_confidence_ipv4: int,
     min_confidence_ipv6: int,
+    max_age_days: int,
 ) -> int:
     """Build and print route plan."""
 
     app = get_app(config_path)
+
     routes = build_route_plan(
         app,
         min_confidence_ipv4,
         min_confidence_ipv6,
+        max_age_days,
     )
 
     print("Route plan")
@@ -353,14 +367,17 @@ def command_export(
     config_path: Path,
     min_confidence_ipv4: int,
     min_confidence_ipv6: int,
+    max_age_days: int,
 ) -> int:
     """Export route plan to BIRD configuration."""
 
     app = get_app(config_path)
+
     routes = build_route_plan(
         app,
         min_confidence_ipv4,
         min_confidence_ipv6,
+        max_age_days,
     )
 
     if not routes:
@@ -418,6 +435,7 @@ def command_run_once(
     service_name: str | None,
     min_confidence_ipv4: int,
     min_confidence_ipv6: int,
+    max_age_days: int,
 ) -> int:
     """Execute one complete update cycle."""
 
@@ -427,6 +445,7 @@ def command_run_once(
         app,
         min_confidence_ipv4,
         min_confidence_ipv6,
+        max_age_days,
     ).run(service_name)
 
     print("RouteCollector cycle completed")
@@ -468,6 +487,7 @@ def command_daemon(
     lock_file: Path,
     min_confidence_ipv4: int,
     min_confidence_ipv6: int,
+    max_age_days: int,
 ) -> int:
     """Run RouteCollector continuously."""
 
@@ -480,6 +500,7 @@ def command_daemon(
         app,
         min_confidence_ipv4,
         min_confidence_ipv6,
+        max_age_days,
     )
 
     daemon = RouteCollectorDaemon(
@@ -526,6 +547,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.config,
             args.min_confidence_ipv4,
             args.min_confidence_ipv6,
+            args.max_age_days,
         )
 
     if args.command == "stats":
@@ -536,6 +558,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.config,
             args.min_confidence_ipv4,
             args.min_confidence_ipv6,
+            args.max_age_days,
         )
 
     if args.command == "bird-check":
@@ -553,6 +576,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.service,
             args.min_confidence_ipv4,
             args.min_confidence_ipv6,
+            args.max_age_days,
         )
 
     if args.command == "daemon":
@@ -563,6 +587,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.lock_file,
             args.min_confidence_ipv4,
             args.min_confidence_ipv6,
+            args.max_age_days,
         )
 
     parser.print_help()

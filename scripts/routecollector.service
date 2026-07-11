@@ -17,7 +17,8 @@ ExecStart=/root/routecollector/.venv/bin/routecollector daemon \
     --service youtube \
     --lock-file /root/routecollector/state/routecollector.lock \
     --min-confidence-ipv4 10 \
-    --min-confidence-ipv6 10
+    --min-confidence-ipv6 10 \
+    --max-age-days 30
 
 Restart=on-failure
 RestartSec=15

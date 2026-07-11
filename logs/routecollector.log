@@ -50,3 +50,29 @@
 2026-07-10 22:32:08,013 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2839 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
 2026-07-10 22:32:08,295 | INFO     | routecollector | Application initialized
 2026-07-10 22:42:56,524 | INFO     | routecollector | Application initialized
+2026-07-10 23:02:38,019 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2840 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-10 23:33:06,633 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2857 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 00:03:37,217 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2847 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 00:34:08,244 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2860 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 01:04:37,441 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2854 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 01:35:05,009 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2843 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 02:05:33,433 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2846 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 02:36:03,491 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2842 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 03:06:33,009 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2848 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 03:37:02,718 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2851 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 04:07:30,859 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2842 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 04:37:59,434 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2854 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 05:08:28,453 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2843 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 05:38:59,595 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2852 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 06:09:28,050 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2847 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 06:39:56,327 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2843 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 07:10:24,306 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2855 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 07:40:52,759 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2846 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 08:11:21,413 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2835 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 08:41:51,801 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2851 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False
+2026-07-11 08:41:58,675 | INFO     | routecollector | Application initialized
+2026-07-11 08:45:42,833 | INFO     | routecollector | Received signal 15, stopping daemon
+2026-07-11 08:45:43,823 | INFO     | routecollector | RouteCollector daemon stopped
+2026-07-11 08:45:43,940 | INFO     | routecollector | Application initialized
+2026-07-11 08:45:43,941 | INFO     | routecollector | RouteCollector daemon started with interval=1800 seconds
+2026-07-11 08:46:13,574 | INFO     | routecollector | Cycle completed: services=1 domains=189 resolved=189 observations=2852 route_stats=39 routes=39 generated_changed=False installed_changed=False bird_reloaded=False rollback=False

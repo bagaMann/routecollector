@@ -59,7 +59,11 @@ class RunOnceWorkflow:
         main_bird_config: Path,
         min_confidence_ipv4: int = 10,
         min_confidence_ipv6: int = 10,
+        max_age_days: int = 30,
     ) -> None:
+        if max_age_days <= 0:
+            raise ValueError("Route maximum age must be greater than zero")
+
         self._repository = repository
         self._services_dir = services_dir
         self._generated_config = generated_config
@@ -67,6 +71,7 @@ class RunOnceWorkflow:
         self._main_bird_config = main_bird_config
         self._min_confidence_ipv4 = min_confidence_ipv4
         self._min_confidence_ipv6 = min_confidence_ipv6
+        self._max_age_days = max_age_days
 
     def run(
         self,
@@ -89,6 +94,7 @@ class RunOnceWorkflow:
             repository=self._repository,
             min_confidence_ipv4=self._min_confidence_ipv4,
             min_confidence_ipv6=self._min_confidence_ipv6,
+            max_age_days=self._max_age_days,
         ).build_plan()
 
         if not routes:
