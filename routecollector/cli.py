@@ -529,6 +529,7 @@ def command_daemon(
         min_confidence_ipv4,
         min_confidence_ipv6,
         max_age_days,
+        enable_ipv6,
     )
 
     daemon = RouteCollectorDaemon(
