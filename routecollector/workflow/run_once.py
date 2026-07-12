@@ -60,6 +60,7 @@ class RunOnceWorkflow:
         min_confidence_ipv4: int = 10,
         min_confidence_ipv6: int = 10,
         max_age_days: int = 30,
+        enable_ipv6: bool = False,
     ) -> None:
         if max_age_days <= 0:
             raise ValueError("Route maximum age must be greater than zero")
@@ -72,6 +73,7 @@ class RunOnceWorkflow:
         self._min_confidence_ipv4 = min_confidence_ipv4
         self._min_confidence_ipv6 = min_confidence_ipv6
         self._max_age_days = max_age_days
+        self._enable_ipv6 = enable_ipv6
 
     def run(
         self,
@@ -88,7 +90,8 @@ class RunOnceWorkflow:
         domains_synced = sync_result.domain_count
 
         domains_resolved, observations_stored = DnsResolver(
-            self._repository
+            self._repository,
+            enable_ipv6=self._enable_ipv6,
         ).resolve_all(service_name)
 
         route_stats_built = self._repository.rebuild_route_stats()
@@ -98,6 +101,7 @@ class RunOnceWorkflow:
             min_confidence_ipv4=self._min_confidence_ipv4,
             min_confidence_ipv6=self._min_confidence_ipv6,
             max_age_days=self._max_age_days,
+            enable_ipv6=self._enable_ipv6,
         ).build_plan()
 
         if not routes:

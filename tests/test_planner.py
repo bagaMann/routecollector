@@ -97,6 +97,7 @@ def test_planner_filters_routes_by_publish_score() -> None:
         min_confidence_ipv4=10,
         min_confidence_ipv6=25,
         now=NOW,
+        enable_ipv6=True,
     )
 
     routes = planner.build_plan()

@@ -33,18 +33,6 @@ class Domain:
 
 
 @dataclass(slots=True, frozen=True)
-class ObservationInput:
-    """Pending DNS observation for batch persistence."""
-
-    domain_id: int | None
-    ip: str
-    source: str
-    dns_server: str | None
-    ttl: int | None
-    confidence: int = 1
-
-
-@dataclass(slots=True, frozen=True)
 class Observation:
     """DNS observation model."""
 
@@ -112,9 +100,7 @@ class Repository:
             ).fetchone()
 
             if row is None:
-                raise RuntimeError(
-                    f"Unable to obtain service id for '{name}'"
-                )
+                raise RuntimeError(f"Unable to obtain service id for '{name}'")
 
             return int(row["id"])
 
@@ -204,16 +190,11 @@ class Repository:
             ).fetchone()
 
             if row is None:
-                raise RuntimeError(
-                    f"Unable to obtain domain id for '{domain}'"
-                )
+                raise RuntimeError(f"Unable to obtain domain id for '{domain}'")
 
             return int(row["id"])
 
-    def list_domains(
-        self,
-        service_name: str | None = None,
-    ) -> list[Domain]:
+    def list_domains(self, service_name: str | None = None) -> list[Domain]:
         """Return active domains, optionally filtered by service name."""
 
         with self._database.connection() as conn:
@@ -258,113 +239,56 @@ class Repository:
         ttl: int | None,
         confidence: int = 1,
     ) -> int:
-        """Insert or update one DNS observation."""
-
-        observation = ObservationInput(
-            domain_id=domain_id,
-            ip=ip,
-            source=source,
-            dns_server=dns_server,
-            ttl=ttl,
-            confidence=confidence,
-        )
+        """Insert or update a DNS observation."""
 
         with self._database.connection() as conn:
-            return self._upsert_observation(conn, observation)
-
-    def add_observations(
-        self,
-        observations: list[ObservationInput],
-    ) -> int:
-        """Insert or update observations in one SQLite transaction."""
-
-        if not observations:
-            return 0
-
-        with self._database.connection() as conn:
-            for observation in observations:
-                self._upsert_observation(conn, observation)
-
-        return len(observations)
-
-    def _upsert_observation(
-        self,
-        conn: object,
-        observation: ObservationInput,
-    ) -> int:
-        """Insert or update one observation using an existing connection."""
-
-        existing = conn.execute(  # type: ignore[attr-defined]
-            """
-            SELECT id, last_seen
-            FROM observations
-            WHERE domain_id IS ?
-              AND ip = ?
-              AND source = ?
-              AND dns_server IS ?
-            """,
-            (
-                observation.domain_id,
-                observation.ip,
-                observation.source,
-                observation.dns_server,
-            ),
-        ).fetchone()
-
-        if existing is None:
-            cursor = conn.execute(  # type: ignore[attr-defined]
+            existing = conn.execute(
                 """
-                INSERT INTO observations
-                    (
-                        domain_id,
-                        ip,
-                        source,
-                        dns_server,
-                        ttl,
-                        confidence
-                    )
-                VALUES (?, ?, ?, ?, ?, ?)
+                SELECT id, last_seen
+                FROM observations
+                WHERE domain_id IS ?
+                  AND ip = ?
+                  AND source = ?
+                  AND dns_server IS ?
                 """,
-                (
-                    observation.domain_id,
-                    observation.ip,
-                    observation.source,
-                    observation.dns_server,
-                    observation.ttl,
-                    observation.confidence,
-                ),
+                (domain_id, ip, source, dns_server),
+            ).fetchone()
+
+            if existing is None:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO observations
+                        (domain_id, ip, source, dns_server, ttl, confidence)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (domain_id, ip, source, dns_server, ttl, confidence),
+                )
+
+                return int(cursor.lastrowid)
+
+            last_seen = datetime.fromisoformat(str(existing["last_seen"]))
+            elapsed_seconds = (datetime.now() - last_seen).total_seconds()
+
+            confidence_increment = (
+                confidence
+                if elapsed_seconds >= self.CONFIDENCE_INTERVAL_SECONDS
+                else 0
             )
-            return int(cursor.lastrowid)
 
-        last_seen = datetime.fromisoformat(str(existing["last_seen"]))
-        elapsed_seconds = (
-            datetime.now() - last_seen
-        ).total_seconds()
+            conn.execute(
+                """
+                UPDATE observations
+                SET
+                    last_seen = CURRENT_TIMESTAMP,
+                    hits = hits + 1,
+                    ttl = ?,
+                    confidence = confidence + ?
+                WHERE id = ?
+                """,
+                (ttl, confidence_increment, int(existing["id"])),
+            )
 
-        confidence_increment = (
-            observation.confidence
-            if elapsed_seconds >= self.CONFIDENCE_INTERVAL_SECONDS
-            else 0
-        )
-
-        conn.execute(  # type: ignore[attr-defined]
-            """
-            UPDATE observations
-            SET
-                last_seen = CURRENT_TIMESTAMP,
-                hits = hits + 1,
-                ttl = ?,
-                confidence = confidence + ?
-            WHERE id = ?
-            """,
-            (
-                observation.ttl,
-                confidence_increment,
-                int(existing["id"]),
-            ),
-        )
-
-        return int(existing["id"])
+            return int(existing["id"])
 
     def list_observations(self) -> list[Observation]:
         """Return all observations with domain source provenance."""

@@ -40,14 +40,10 @@ class FakeServiceSourceSync:
         )
 
 class FakeDnsResolver:
-    """Resolver stub for workflow tests."""
+    """Fake DNS resolver."""
 
-    def __init__(
-        self,
-        _: Any,
-        **kwargs: Any,
-    ) -> None:
-        assert kwargs.get("enable_ipv6") is False
+    def __init__(self, _: Any) -> None:
+        pass
 
     def resolve_all(
         self,
@@ -57,6 +53,7 @@ class FakeDnsResolver:
 
         assert service_name == "youtube"
         return 189, 2800
+
 
 class FakeRoutePlanner:
     """Fake route planner."""

@@ -42,6 +42,7 @@ class RoutePlanner:
         max_age_days: int = 30,
         now: datetime | None = None,
         publish_score_policy: PublishScorePolicy | None = None,
+        enable_ipv6: bool = False,
     ) -> None:
         if not 0 <= min_confidence_ipv4 <= 100:
             raise ValueError(
@@ -64,6 +65,7 @@ class RoutePlanner:
         self._publish_score_policy = (
             publish_score_policy or PublishScorePolicy()
         )
+        self._enable_ipv6 = enable_ipv6
 
     def build_plan(self) -> list[PlannedRoute]:
         """Build publishable route prefixes."""
@@ -73,6 +75,9 @@ class RoutePlanner:
 
         for stat in self._repository.list_route_stats():
             if stat.family not in {4, 6}:
+                continue
+
+            if stat.family == 6 and not self._enable_ipv6:
                 continue
 
             if stat.last_seen is None:

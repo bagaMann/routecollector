@@ -58,6 +58,11 @@ def add_route_policy_arguments(
         default=DEFAULT_MAX_AGE_DAYS,
         help="Maximum route age in days",
     )
+    parser.add_argument(
+        "--enable-ipv6",
+        action="store_true",
+        help="Resolve and publish IPv6 routes",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -104,6 +109,11 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         default=None,
         help="Optional service name",
+    )
+    resolve_parser.add_argument(
+        "--enable-ipv6",
+        action="store_true",
+        help="Resolve IPv6 AAAA records",
     )
 
     plan_parser = subparsers.add_parser(
@@ -191,6 +201,7 @@ def build_workflow(
     min_confidence_ipv4: int,
     min_confidence_ipv6: int,
     max_age_days: int,
+    enable_ipv6: bool,
 ) -> RunOnceWorkflow:
     """Build complete RouteCollector workflow."""
 
@@ -206,6 +217,7 @@ def build_workflow(
         min_confidence_ipv4=min_confidence_ipv4,
         min_confidence_ipv6=min_confidence_ipv6,
         max_age_days=max_age_days,
+        enable_ipv6=enable_ipv6,
     )
 
 
@@ -214,6 +226,7 @@ def build_route_plan(
     min_confidence_ipv4: int,
     min_confidence_ipv6: int,
     max_age_days: int,
+    enable_ipv6: bool,
 ) -> list[PlannedRoute]:
     """Build route plan for initialized application."""
 
@@ -225,6 +238,7 @@ def build_route_plan(
         min_confidence_ipv4=min_confidence_ipv4,
         min_confidence_ipv6=min_confidence_ipv6,
         max_age_days=max_age_days,
+        enable_ipv6=enable_ipv6,
     ).build_plan()
 
 
@@ -289,6 +303,7 @@ def command_sync(config_path: Path) -> int:
 def command_resolve(
     config_path: Path,
     service_name: str | None,
+    enable_ipv6: bool,
 ) -> int:
     """Resolve configured domains."""
 
@@ -297,7 +312,8 @@ def command_resolve(
     assert app.repository is not None
 
     domains, observations = DnsResolver(
-        app.repository
+        app.repository,
+        enable_ipv6=enable_ipv6,
     ).resolve_all(service_name)
 
     print("DNS resolve completed")
@@ -312,6 +328,7 @@ def command_plan(
     min_confidence_ipv4: int,
     min_confidence_ipv6: int,
     max_age_days: int,
+    enable_ipv6: bool,
 ) -> int:
     """Build and print route plan."""
 
@@ -322,6 +339,7 @@ def command_plan(
         min_confidence_ipv4,
         min_confidence_ipv6,
         max_age_days,
+        enable_ipv6,
     )
 
     print("Route plan")
@@ -373,6 +391,7 @@ def command_export(
     min_confidence_ipv4: int,
     min_confidence_ipv6: int,
     max_age_days: int,
+    enable_ipv6: bool,
 ) -> int:
     """Export route plan to BIRD configuration."""
 
@@ -383,6 +402,7 @@ def command_export(
         min_confidence_ipv4,
         min_confidence_ipv6,
         max_age_days,
+        enable_ipv6,
     )
 
     if not routes:
@@ -441,6 +461,7 @@ def command_run_once(
     min_confidence_ipv4: int,
     min_confidence_ipv6: int,
     max_age_days: int,
+    enable_ipv6: bool,
 ) -> int:
     """Execute one complete update cycle."""
 
@@ -451,6 +472,7 @@ def command_run_once(
         min_confidence_ipv4,
         min_confidence_ipv6,
         max_age_days,
+        enable_ipv6,
     ).run(service_name)
 
     print("RouteCollector cycle completed")
@@ -493,6 +515,7 @@ def command_daemon(
     min_confidence_ipv4: int,
     min_confidence_ipv6: int,
     max_age_days: int,
+    enable_ipv6: bool,
 ) -> int:
     """Run RouteCollector continuously."""
 
@@ -545,6 +568,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return command_resolve(
             args.config,
             args.service,
+            args.enable_ipv6,
         )
 
     if args.command == "plan":
@@ -553,6 +577,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.min_confidence_ipv4,
             args.min_confidence_ipv6,
             args.max_age_days,
+            args.enable_ipv6,
         )
 
     if args.command == "stats":
@@ -564,6 +589,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.min_confidence_ipv4,
             args.min_confidence_ipv6,
             args.max_age_days,
+            args.enable_ipv6,
         )
 
     if args.command == "bird-check":
@@ -582,6 +608,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.min_confidence_ipv4,
             args.min_confidence_ipv6,
             args.max_age_days,
+            args.enable_ipv6,
         )
 
     if args.command == "daemon":
@@ -593,6 +620,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.min_confidence_ipv4,
             args.min_confidence_ipv6,
             args.max_age_days,
+            args.enable_ipv6,
         )
 
     parser.print_help()
