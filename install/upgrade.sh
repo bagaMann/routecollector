@@ -24,9 +24,15 @@ git -C "${INSTALL_DIR}" pull --ff-only
 "${INSTALL_DIR}/.venv/bin/python" -m pip install --upgrade pip
 "${INSTALL_DIR}/.venv/bin/pip" install -e "${INSTALL_DIR}"
 
-ln -sf \
-    "${INSTALL_DIR}/.venv/bin/routecollector" \
-    /usr/local/bin/routecollector
+cat > /usr/local/bin/routecollector <<EOF
+#!/usr/bin/env bash
+set -e
+
+cd "${INSTALL_DIR}"
+exec "${INSTALL_DIR}/.venv/bin/routecollector" "\$@"
+EOF
+
+chmod 755 /usr/local/bin/routecollector
 
 cd "${INSTALL_DIR}"
 "${INSTALL_DIR}/.venv/bin/routecollector" init

@@ -29,9 +29,15 @@ python3 -m venv "${INSTALL_DIR}/.venv"
 "${INSTALL_DIR}/.venv/bin/python" -m pip install --upgrade pip
 "${INSTALL_DIR}/.venv/bin/pip" install -e "${INSTALL_DIR}"
 
-ln -sf \
-    "${INSTALL_DIR}/.venv/bin/routecollector" \
-    /usr/local/bin/routecollector
+cat > /usr/local/bin/routecollector <<EOF
+#!/usr/bin/env bash
+set -e
+
+cd "${INSTALL_DIR}"
+exec "${INSTALL_DIR}/.venv/bin/routecollector" "\$@"
+EOF
+
+chmod 755 /usr/local/bin/routecollector
 
 mkdir -p "${INSTALL_DIR}/state" "${INSTALL_DIR}/logs" "${INSTALL_DIR}/cache" "${INSTALL_DIR}/bird"
 
