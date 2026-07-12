@@ -27,3 +27,11 @@ state/
 
 # Generated BIRD configs
 bird/*.conf
+
+
+*.db-shm
+*.db-wal
+
+*.before-*
+fix_*.py
+patch_*.py

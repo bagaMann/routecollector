@@ -14,6 +14,7 @@ fail() { printf '[routecollector] ERROR: %s\n' "$*" >&2; exit 1; }
 
 systemctl disable --now routecollector.service 2>/dev/null || true
 rm -f "${SERVICE_FILE}"
+rm -f /usr/local/bin/routecollector
 systemctl daemon-reload
 systemctl reset-failed
 
