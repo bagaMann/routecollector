@@ -5,6 +5,7 @@ Command line interface for RouteCollector.
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 from typing import Sequence
 
@@ -64,7 +65,6 @@ def add_route_policy_arguments(
         help="Resolve and publish IPv6 routes",
     )
 
-
 def build_parser() -> argparse.ArgumentParser:
     """Build command line parser."""
 
@@ -79,6 +79,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_CONFIG,
         type=Path,
         help="Path to configuration file",
+    )
+
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress informational log messages",
     )
 
     subparsers = parser.add_subparsers(dest="command")
@@ -552,6 +558,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.quiet:
+        logging.disable(logging.INFO)
 
     if args.command == "version":
         return command_version()

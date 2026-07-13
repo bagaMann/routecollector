@@ -95,13 +95,15 @@ printf '\n'
 
 cd "${INSTALL_DIR}"
 
-"${INSTALL_DIR}/.venv/bin/routecollector" version
+"${INSTALL_DIR}/.venv/bin/routecollector" \
+    --quiet version
 
 printf '\n'
 printf '%s\n' 'Installation status'
 printf '%s\n' '-------------------'
 
-"${INSTALL_DIR}/.venv/bin/routecollector" status
+"${INSTALL_DIR}/.venv/bin/routecollector" \
+    --quiet status
 
 printf '\n'
 printf '%s\n' 'Services'
@@ -118,6 +120,18 @@ with sqlite3.connect(database_path) as connection:
         "SELECT COUNT(*) FROM services WHERE enabled = 1"
     ).fetchone()[0]
 
+    service_names = [
+        row[0]
+        for row in connection.execute(
+            """
+            SELECT name
+            FROM services
+            WHERE enabled = 1
+            ORDER BY name
+            """
+        ).fetchall()
+    ]
+
     domain_count = connection.execute(
         "SELECT COUNT(*) FROM domains WHERE active = 1"
     ).fetchone()[0]
@@ -131,6 +145,7 @@ with sqlite3.connect(database_path) as connection:
     ).fetchone()[0]
 
 print(f"Enabled services   : {service_count}")
+print(f"Service names      : " + ", ".join(service_names))
 print(f"Active domains     : {domain_count}")
 print(f"DNS observations   : {observation_count}")
 print(f"Route statistics   : {route_count}")
