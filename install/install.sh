@@ -88,24 +88,24 @@ systemctl is-active --quiet bird || fail "BIRD is not active."
 systemctl is-active --quiet routecollector.service || fail "RouteCollector is not active."
 
 printf '\n'
-printf '============================================\n'
-printf 'RouteCollector installation completed\n'
-printf '============================================\n'
-printf '\n'
+printf '%s\n' '============================================\n'
+printf '%s\n' 'RouteCollector installation completed\n'
+printf '%s\n' '============================================\n'
+printf '%s\n' '\n'
 
 cd "${INSTALL_DIR}"
 
 "${INSTALL_DIR}/.venv/bin/routecollector" version
 
 printf '\n'
-printf 'Installation status\n'
-printf '-------------------\n'
+printf '%s\n' 'Installation status\n'
+printf '%s\n' '-------------------\n'
 
 "${INSTALL_DIR}/.venv/bin/routecollector" status
 
 printf '\n'
-printf 'Services\n'
-printf '--------\n'
+printf '%s\n' 'Services\n'
+printf '%s\n' '--------\n'
 
 "${INSTALL_DIR}/.venv/bin/python" - <<'PY'
 import sqlite3
@@ -137,8 +137,8 @@ print(f"Route statistics   : {route_count}")
 PY
 
 printf '\n'
-printf 'System services\n'
-printf '---------------\n'
+printf '%s\n' 'System services\n'
+printf '%s\n' '---------------\n'
 printf 'BIRD               : %s\n' \
     "$(systemctl is-active bird)"
 printf 'RouteCollector     : %s\n' \
@@ -146,7 +146,7 @@ printf 'RouteCollector     : %s\n' \
 
 printf '\n'
 printf 'Paths\n'
-printf '-----\n'
+printf '%s\n' '-----\n'
 printf 'Installation       : %s\n' "${INSTALL_DIR}"
 printf 'Configuration      : %s\n' \
     "${INSTALL_DIR}/config"
@@ -158,8 +158,8 @@ printf 'Global command     : %s\n' \
     "/usr/local/bin/routecollector"
 
 printf '\n'
-printf 'Useful commands\n'
-printf '---------------\n'
+printf '%s\n' 'Useful commands\n'
+printf '%s\n' '---------------\n'
 printf 'routecollector status\n'
 printf 'routecollector plan\n'
 printf 'systemctl status routecollector.service\n'
@@ -167,6 +167,6 @@ printf 'journalctl -u routecollector.service -f\n'
 printf 'birdc show protocols\n'
 
 printf '\n'
-printf '============================================\n'
-printf 'RouteCollector is ready for operation.\n'
-printf '============================================\n'
+printf '%s\n' '============================================\n'
+printf '%s\n' 'RouteCollector is ready for operation.\n'
+printf '%s\n' '============================================\n'
