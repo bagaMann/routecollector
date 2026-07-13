@@ -87,10 +87,86 @@ systemctl enable --now routecollector.service
 systemctl is-active --quiet bird || fail "BIRD is not active."
 systemctl is-active --quiet routecollector.service || fail "RouteCollector is not active."
 
-printf '\n============================================\n'
-printf 'RouteCollector installation completed.\n'
-printf 'Install directory : %s\n' "${INSTALL_DIR}"
-printf 'BIRD service      : active\n'
-printf 'RouteCollector    : active\n'
-printf 'Logs              : journalctl -u routecollector.service -f\n'
+printf '\n'
+printf '============================================\n'
+printf 'RouteCollector installation completed\n'
+printf '============================================\n'
+printf '\n'
+
+cd "${INSTALL_DIR}"
+
+"${INSTALL_DIR}/.venv/bin/routecollector" version
+
+printf '\n'
+printf 'Installation status\n'
+printf '-------------------\n'
+
+"${INSTALL_DIR}/.venv/bin/routecollector" status
+
+printf '\n'
+printf 'Services\n'
+printf '--------\n'
+
+"${INSTALL_DIR}/.venv/bin/python" - <<'PY'
+import sqlite3
+from pathlib import Path
+
+database_path = Path("state/state.db")
+
+with sqlite3.connect(database_path) as connection:
+    service_count = connection.execute(
+        "SELECT COUNT(*) FROM services WHERE enabled = 1"
+    ).fetchone()[0]
+
+    domain_count = connection.execute(
+        "SELECT COUNT(*) FROM domains WHERE active = 1"
+    ).fetchone()[0]
+
+    observation_count = connection.execute(
+        "SELECT COUNT(*) FROM observations"
+    ).fetchone()[0]
+
+    route_count = connection.execute(
+        "SELECT COUNT(*) FROM route_stats"
+    ).fetchone()[0]
+
+print(f"Enabled services   : {service_count}")
+print(f"Active domains     : {domain_count}")
+print(f"DNS observations   : {observation_count}")
+print(f"Route statistics   : {route_count}")
+PY
+
+printf '\n'
+printf 'System services\n'
+printf '---------------\n'
+printf 'BIRD               : %s\n' \
+    "$(systemctl is-active bird)"
+printf 'RouteCollector     : %s\n' \
+    "$(systemctl is-active routecollector.service)"
+
+printf '\n'
+printf 'Paths\n'
+printf '-----\n'
+printf 'Installation       : %s\n' "${INSTALL_DIR}"
+printf 'Configuration      : %s\n' \
+    "${INSTALL_DIR}/config"
+printf 'Database           : %s\n' \
+    "${INSTALL_DIR}/state/state.db"
+printf 'BIRD configuration : %s\n' \
+    "/etc/bird/routecollector.conf"
+printf 'Global command     : %s\n' \
+    "/usr/local/bin/routecollector"
+
+printf '\n'
+printf 'Useful commands\n'
+printf '---------------\n'
+printf 'routecollector status\n'
+printf 'routecollector plan\n'
+printf 'systemctl status routecollector.service\n'
+printf 'journalctl -u routecollector.service -f\n'
+printf 'birdc show protocols\n'
+
+printf '\n'
+printf '============================================\n'
+printf 'RouteCollector is ready for operation.\n'
 printf '============================================\n'
