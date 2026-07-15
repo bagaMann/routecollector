@@ -14,6 +14,7 @@ from routecollector.core.application import Application
 from routecollector.core.version import get_version
 from routecollector.exporter.bird import BirdExporter
 from routecollector.exporter.birdctl import BirdConfigInstaller, BirdControl
+from routecollector.history.plan_snapshot import PlanSnapshotStore
 from routecollector.parser.service_config import ServiceConfigSync
 from routecollector.planner.planner import PlannedRoute, RoutePlanner
 from routecollector.resolver.resolver import DnsResolver
@@ -30,6 +31,7 @@ DEFAULT_BIRD_OUTPUT = Path("bird/routecollector.conf")
 DEFAULT_BIRD_TARGET = Path("/etc/bird/routecollector.conf")
 DEFAULT_BIRD_MAIN_CONFIG = Path("/etc/bird/bird.conf")
 DEFAULT_DAEMON_LOCK = Path("state/routecollector.lock")
+DEFAULT_PLAN_SNAPSHOTS = Path("state/plans")
 DEFAULT_DAEMON_INTERVAL = 1800
 DEFAULT_MAX_AGE_DAYS = 30
 DEFAULT_MIN_PUBLISH_SCORE_IPV4 = 60
@@ -131,6 +133,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "stats",
         help="Rebuild and show route statistics",
+    )
+    subparsers.add_parser(
+        "changes",
+        help="Show changes between the latest route plans",
     )
 
     export_parser = subparsers.add_parser(
@@ -392,6 +398,75 @@ def command_stats(config_path: Path) -> int:
     return 0
 
 
+
+def command_changes(
+    snapshot_directory: Path = DEFAULT_PLAN_SNAPSHOTS,
+) -> int:
+    """Print route membership changes between latest snapshots."""
+
+    store = PlanSnapshotStore(snapshot_directory)
+    changes = store.changes()
+
+    if changes is None:
+        snapshot_count = len(store.list_paths())
+
+        print("Route plan changes")
+        print()
+
+        if snapshot_count == 0:
+            print("No route plan snapshots are available.")
+            print("Run routecollector run-once to create the first snapshot.")
+        else:
+            print("Only one route plan snapshot is available.")
+            print("At least two snapshots are required for comparison.")
+
+        return 0
+
+    print("Route plan changes")
+    print()
+    print(f"Routes before: {changes.previous_count}")
+    print(f"Routes now:    {changes.current_count}")
+    print(f"Added:         {len(changes.added)}")
+    print(f"Removed:       {len(changes.removed)}")
+    print()
+
+    if not changes.changed:
+        print("No route membership changes detected.")
+        return 0
+
+    if changes.added:
+        print("Added routes")
+        print("------------")
+
+        for route in changes.added:
+            print(
+                f"+ {route.prefix:<24} "
+                f"family=IPv{route.family} "
+                f"publish_score={route.publish_score:<3} "
+                f"confidence={route.confidence:<3} "
+                f"trust={route.source_trust:<3} "
+                f"sources={route.source_count}"
+            )
+
+        print()
+
+    if changes.removed:
+        print("Removed routes")
+        print("--------------")
+
+        for route in changes.removed:
+            print(
+                f"- {route.prefix:<24} "
+                f"family=IPv{route.family} "
+                f"publish_score={route.publish_score:<3} "
+                f"confidence={route.confidence:<3} "
+                f"trust={route.source_trust:<3} "
+                f"sources={route.source_count}"
+            )
+
+    return 0
+
+
 def command_export(
     config_path: Path,
     min_confidence_ipv4: int,
@@ -592,6 +667,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "stats":
         return command_stats(args.config)
+
+    if args.command == "changes":
+        return command_changes()
 
     if args.command == "export":
         return command_export(

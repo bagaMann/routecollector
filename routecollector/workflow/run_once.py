@@ -14,6 +14,7 @@ from routecollector.exporter.birdctl import (
     BirdControl,
     BirdControlError,
 )
+from routecollector.history.plan_snapshot import PlanSnapshotStore
 from routecollector.planner.planner import RoutePlanner
 from routecollector.resolver.resolver import DnsResolver
 from routecollector.sources.service_source_sync import ServiceSourceSync
@@ -33,16 +34,12 @@ class RunOnceResult:
     observations_stored: int
     route_stats_built: int
     planned_routes: int
-
     generated_config: Path
     generated_changed: bool
-
     installed_config: Path
     installed_changed: bool
-
     bird_check_output: str
     bird_reload_output: str | None
-
     bird_reloaded: bool
     rollback_performed: bool
 
@@ -61,9 +58,12 @@ class RunOnceWorkflow:
         min_confidence_ipv6: int = 10,
         max_age_days: int = 30,
         enable_ipv6: bool = False,
+        snapshot_directory: Path = Path("state/plans"),
     ) -> None:
         if max_age_days <= 0:
-            raise ValueError("Route maximum age must be greater than zero")
+            raise ValueError(
+                "Route maximum age must be greater than zero"
+            )
 
         self._repository = repository
         self._services_dir = services_dir
@@ -74,6 +74,7 @@ class RunOnceWorkflow:
         self._min_confidence_ipv6 = min_confidence_ipv6
         self._max_age_days = max_age_days
         self._enable_ipv6 = enable_ipv6
+        self._snapshot_directory = snapshot_directory
 
     def run(
         self,
@@ -106,7 +107,8 @@ class RunOnceWorkflow:
 
         if not routes:
             raise RunOnceError(
-                "Route plan is empty; refusing to replace BIRD configuration"
+                "Route plan is empty; refusing to replace "
+                "BIRD configuration"
             )
 
         export_result = BirdExporter(
@@ -118,8 +120,8 @@ class RunOnceWorkflow:
             target_file=self._installed_config,
             main_config=self._main_bird_config,
         )
-
         install_result = installer.install()
+
         bird = BirdControl()
 
         bird_check_output = ""
@@ -133,11 +135,16 @@ class RunOnceWorkflow:
             if install_result.changed:
                 bird_reload_output = bird.configure()
                 bird_reloaded = True
-                installer.remove_backup(install_result.backup_path)
+
+            installer.remove_backup(
+                install_result.backup_path
+            )
 
         except BirdControlError as exc:
             if install_result.changed:
-                installer.rollback(install_result.backup_path)
+                installer.rollback(
+                    install_result.backup_path
+                )
                 rollback_performed = True
 
                 try:
@@ -145,13 +152,20 @@ class RunOnceWorkflow:
                     bird.configure()
                 except BirdControlError as rollback_exc:
                     raise RunOnceError(
-                        "New BIRD configuration failed and rollback "
-                        f"could not be applied: {rollback_exc}"
+                        "New BIRD configuration failed and "
+                        "rollback could not be applied: "
+                        f"{rollback_exc}"
                     ) from rollback_exc
 
             raise RunOnceError(
-                f"New BIRD configuration rejected; rollback completed: {exc}"
+                "New BIRD configuration rejected; "
+                f"rollback completed: {exc}"
             ) from exc
+
+        # Save only a successfully validated and applied route plan.
+        PlanSnapshotStore(
+            self._snapshot_directory
+        ).save(routes)
 
         return RunOnceResult(
             services_synced=services_synced,

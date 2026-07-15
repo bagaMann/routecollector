@@ -12,7 +12,10 @@ import pytest
 
 import routecollector.workflow.run_once as workflow_module
 from routecollector.exporter.birdctl import BirdControlError
-from routecollector.workflow.run_once import RunOnceError, RunOnceWorkflow
+from routecollector.workflow.run_once import (
+    RunOnceError,
+    RunOnceWorkflow,
+)
 
 
 class FakeRepository:
@@ -39,8 +42,9 @@ class FakeServiceSourceSync:
             services=(),
         )
 
+
 class FakeDnsResolver:
-    """Resolver stub for workflow tests."""
+    """Fake DNS resolver."""
 
     def __init__(
         self,
@@ -58,6 +62,7 @@ class FakeDnsResolver:
         assert service_name == "youtube"
         return 189, 2800
 
+
 class FakeRoutePlanner:
     """Fake route planner."""
 
@@ -72,7 +77,12 @@ class FakeRoutePlanner:
                 prefix="192.0.2.0/24",
                 family=4,
                 source_ips=5,
-                confidence=20,
+                unique_domains=4,
+                unique_resolvers=2,
+                source_count=2,
+                source_trust=100,
+                confidence=80,
+                publish_score=95,
             )
         ]
 
@@ -99,7 +109,9 @@ def patch_common_components(
     )
 
 
-def build_workflow(tmp_path: Path) -> RunOnceWorkflow:
+def build_workflow(
+    tmp_path: Path,
+) -> RunOnceWorkflow:
     """Create a workflow with temporary paths."""
 
     return RunOnceWorkflow(
@@ -108,7 +120,20 @@ def build_workflow(tmp_path: Path) -> RunOnceWorkflow:
         generated_config=tmp_path / "generated.conf",
         installed_config=tmp_path / "installed.conf",
         main_bird_config=tmp_path / "bird.conf",
+        snapshot_directory=tmp_path / "plans",
     )
+
+
+def assert_single_snapshot(
+    tmp_path: Path,
+) -> None:
+    """Assert that one plan snapshot was created."""
+
+    snapshot_files = list(
+        (tmp_path / "plans").glob("*.json")
+    )
+
+    assert len(snapshot_files) == 1
 
 
 def test_run_once_skips_reload_when_config_is_unchanged(
@@ -123,8 +148,12 @@ def test_run_once_skips_reload_when_config_is_unchanged(
         def __init__(self, output_file: Path) -> None:
             self._output_file = output_file
 
-        def export(self, routes: list[Any]) -> SimpleNamespace:
+        def export(
+            self,
+            routes: list[Any],
+        ) -> SimpleNamespace:
             assert len(routes) == 1
+
             return SimpleNamespace(
                 path=self._output_file,
                 changed=False,
@@ -141,6 +170,12 @@ def test_run_once_skips_reload_when_config_is_unchanged(
                 backup_path=None,
             )
 
+        def remove_backup(
+            self,
+            _: Path | None,
+        ) -> None:
+            pass
+
     class FakeBirdControl:
         configure_calls = 0
 
@@ -151,7 +186,11 @@ def test_run_once_skips_reload_when_config_is_unchanged(
             type(self).configure_calls += 1
             return "Reconfigured"
 
-    monkeypatch.setattr(workflow_module, "BirdExporter", FakeExporter)
+    monkeypatch.setattr(
+        workflow_module,
+        "BirdExporter",
+        FakeExporter,
+    )
     monkeypatch.setattr(
         workflow_module,
         "BirdConfigInstaller",
@@ -172,6 +211,8 @@ def test_run_once_skips_reload_when_config_is_unchanged(
     assert result.bird_reload_output is None
     assert FakeBirdControl.configure_calls == 0
 
+    assert_single_snapshot(tmp_path)
+
 
 def test_run_once_reloads_bird_when_config_changed(
     tmp_path: Path,
@@ -187,8 +228,12 @@ def test_run_once_reloads_bird_when_config_changed(
         def __init__(self, output_file: Path) -> None:
             self._output_file = output_file
 
-        def export(self, routes: list[Any]) -> SimpleNamespace:
+        def export(
+            self,
+            routes: list[Any],
+        ) -> SimpleNamespace:
             assert len(routes) == 1
+
             return SimpleNamespace(
                 path=self._output_file,
                 changed=True,
@@ -208,11 +253,17 @@ def test_run_once_reloads_bird_when_config_changed(
                 backup_path=backup_path,
             )
 
-        def remove_backup(self, path: Path | None) -> None:
+        def remove_backup(
+            self,
+            path: Path | None,
+        ) -> None:
             assert path == backup_path
             type(self).backup_removed = True
 
-        def rollback(self, _: Path | None) -> None:
+        def rollback(
+            self,
+            _: Path | None,
+        ) -> None:
             type(self).rollback_called = True
 
     class FakeBirdControl:
@@ -222,7 +273,11 @@ def test_run_once_reloads_bird_when_config_changed(
         def configure(self) -> str:
             return "Reconfigured"
 
-    monkeypatch.setattr(workflow_module, "BirdExporter", FakeExporter)
+    monkeypatch.setattr(
+        workflow_module,
+        "BirdExporter",
+        FakeExporter,
+    )
     monkeypatch.setattr(
         workflow_module,
         "BirdConfigInstaller",
@@ -244,12 +299,14 @@ def test_run_once_reloads_bird_when_config_changed(
     assert FakeInstaller.backup_removed is True
     assert FakeInstaller.rollback_called is False
 
+    assert_single_snapshot(tmp_path)
+
 
 def test_run_once_rolls_back_when_bird_reload_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Failed BIRD reload must restore and apply the previous config."""
+    """Failed BIRD reload must restore previous config."""
 
     patch_common_components(monkeypatch)
 
@@ -259,7 +316,10 @@ def test_run_once_rolls_back_when_bird_reload_fails(
         def __init__(self, output_file: Path) -> None:
             self._output_file = output_file
 
-        def export(self, routes: list[Any]) -> SimpleNamespace:
+        def export(
+            self,
+            routes: list[Any],
+        ) -> SimpleNamespace:
             return SimpleNamespace(
                 path=self._output_file,
                 changed=True,
@@ -279,11 +339,17 @@ def test_run_once_rolls_back_when_bird_reload_fails(
                 backup_path=backup_path,
             )
 
-        def rollback(self, path: Path | None) -> None:
+        def rollback(
+            self,
+            path: Path | None,
+        ) -> None:
             assert path == backup_path
             type(self).rollback_called = True
 
-        def remove_backup(self, _: Path | None) -> None:
+        def remove_backup(
+            self,
+            _: Path | None,
+        ) -> None:
             type(self).backup_removed = True
 
     class FakeBirdControl:
@@ -302,7 +368,11 @@ def test_run_once_rolls_back_when_bird_reload_fails(
 
             return "Rollback configuration applied"
 
-    monkeypatch.setattr(workflow_module, "BirdExporter", FakeExporter)
+    monkeypatch.setattr(
+        workflow_module,
+        "BirdExporter",
+        FakeExporter,
+    )
     monkeypatch.setattr(
         workflow_module,
         "BirdConfigInstaller",
@@ -325,12 +395,16 @@ def test_run_once_rolls_back_when_bird_reload_fails(
     assert FakeBirdControl.configure_calls == 2
     assert FakeBirdControl.check_calls == 2
 
+    assert list(
+        (tmp_path / "plans").glob("*.json")
+    ) == []
+
 
 def test_run_once_rejects_empty_route_plan(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An empty plan must never replace the active BIRD config."""
+    """An empty plan must never replace active BIRD config."""
 
     patch_common_components(monkeypatch)
 
@@ -352,3 +426,7 @@ def test_run_once_rejects_empty_route_plan(
         match="Route plan is empty",
     ):
         build_workflow(tmp_path).run("youtube")
+
+    assert list(
+        (tmp_path / "plans").glob("*.json")
+    ) == []
