@@ -14,6 +14,7 @@ from routecollector.core.application import Application
 from routecollector.core.version import get_version
 from routecollector.exporter.bird import BirdExporter
 from routecollector.exporter.birdctl import BirdConfigInstaller, BirdControl
+from routecollector.history.cycle_history import CycleHistoryStore
 from routecollector.history.plan_snapshot import PlanSnapshotStore
 from routecollector.parser.service_config import ServiceConfigSync
 from routecollector.planner.planner import PlannedRoute, RoutePlanner
@@ -139,6 +140,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show changes between the latest route plans",
     )
 
+    history_parser = subparsers.add_parser(
+        "history",
+        help="Show successful RouteCollector cycle history",
+    )
+    history_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Maximum number of cycles to display",
+    )
+
     export_parser = subparsers.add_parser(
         "export",
         help="Export route plan to BIRD",
@@ -220,8 +232,12 @@ def build_workflow(
     if app.repository is None:
         raise RuntimeError("Repository is not initialized")
 
+    if app.database is None:
+        raise RuntimeError("Database is not initialized")
+
     return RunOnceWorkflow(
         repository=app.repository,
+        database=app.database,
         services_dir=DEFAULT_SERVICES_DIR,
         generated_config=DEFAULT_BIRD_OUTPUT,
         installed_config=DEFAULT_BIRD_TARGET,
@@ -467,6 +483,56 @@ def command_changes(
     return 0
 
 
+
+def command_history(
+    config_path: Path,
+    limit: int,
+) -> int:
+    """Print recent successful RouteCollector cycles."""
+
+    app = get_app(config_path)
+
+    if app.database is None:
+        raise RuntimeError("Database is not initialized")
+
+    entries = CycleHistoryStore(
+        app.database
+    ).list_recent(limit=limit)
+
+    print("RouteCollector cycle history")
+    print()
+
+    if not entries:
+        print("No successful cycles are stored.")
+        return 0
+
+    for entry in entries:
+        service = entry.service_name or "all"
+        reload_state = "yes" if entry.bird_reloaded else "no"
+
+        print(
+            f"#{entry.id:<4} "
+            f"{entry.completed_at} "
+            f"duration={entry.duration_seconds:.1f}s "
+            f"service={service}"
+        )
+        print(
+            f"      routes={entry.planned_routes} "
+            f"added={entry.routes_added} "
+            f"removed={entry.routes_removed} "
+            f"bird_reloaded={reload_state}"
+        )
+        print(
+            f"      services={entry.services_synced} "
+            f"domains={entry.domains_synced} "
+            f"resolved={entry.domains_resolved} "
+            f"observations={entry.observations_stored} "
+            f"route_stats={entry.route_stats_built}"
+        )
+        print()
+
+    return 0
+
 def command_export(
     config_path: Path,
     min_confidence_ipv4: int,
@@ -564,6 +630,9 @@ def command_run_once(
     print(f"Observations stored: {result.observations_stored}")
     print(f"Route statistics:    {result.route_stats_built}")
     print(f"Planned routes:      {result.planned_routes}")
+    print(f"Routes added:        {result.routes_added}")
+    print(f"Routes removed:      {result.routes_removed}")
+    print(f"Duration:            {result.duration_seconds:.1f}s")
     print(f"Generated config:    {result.generated_config}")
     print(
         "Generated changed:   "
@@ -670,6 +739,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "changes":
         return command_changes()
+
+    if args.command == "history":
+        return command_history(
+            args.config,
+            args.limit,
+        )
 
     if args.command == "export":
         return command_export(

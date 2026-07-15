@@ -11,7 +11,9 @@ from typing import Any
 import pytest
 
 import routecollector.workflow.run_once as workflow_module
+from routecollector.core.database import Database
 from routecollector.exporter.birdctl import BirdControlError
+from routecollector.history.cycle_history import CycleHistoryStore
 from routecollector.workflow.run_once import (
     RunOnceError,
     RunOnceWorkflow,
@@ -111,11 +113,15 @@ def patch_common_components(
 
 def build_workflow(
     tmp_path: Path,
-) -> RunOnceWorkflow:
+) -> tuple[RunOnceWorkflow, Database]:
     """Create a workflow with temporary paths."""
 
-    return RunOnceWorkflow(
+    database = Database(tmp_path / "state.db")
+    database.initialize()
+
+    workflow = RunOnceWorkflow(
         repository=FakeRepository(),  # type: ignore[arg-type]
+        database=database,
         services_dir=tmp_path / "services",
         generated_config=tmp_path / "generated.conf",
         installed_config=tmp_path / "installed.conf",
@@ -123,17 +129,17 @@ def build_workflow(
         snapshot_directory=tmp_path / "plans",
     )
 
+    return workflow, database
 
-def assert_single_snapshot(
+
+def snapshot_paths(
     tmp_path: Path,
-) -> None:
-    """Assert that one plan snapshot was created."""
+) -> list[Path]:
+    """Return all stored test snapshots."""
 
-    snapshot_files = list(
+    return list(
         (tmp_path / "plans").glob("*.json")
     )
-
-    assert len(snapshot_files) == 1
 
 
 def test_run_once_skips_reload_when_config_is_unchanged(
@@ -202,16 +208,27 @@ def test_run_once_skips_reload_when_config_is_unchanged(
         FakeBirdControl,
     )
 
-    result = build_workflow(tmp_path).run("youtube")
+    workflow, database = build_workflow(tmp_path)
+    result = workflow.run("youtube")
 
     assert result.generated_changed is False
     assert result.installed_changed is False
     assert result.bird_reloaded is False
     assert result.rollback_performed is False
     assert result.bird_reload_output is None
+    assert result.routes_added == 0
+    assert result.routes_removed == 0
+    assert result.duration_seconds >= 0
     assert FakeBirdControl.configure_calls == 0
+    assert len(snapshot_paths(tmp_path)) == 1
 
-    assert_single_snapshot(tmp_path)
+    history = CycleHistoryStore(database).latest()
+    assert history is not None
+    assert history.service_name == "youtube"
+    assert history.planned_routes == 1
+    assert history.routes_added == 0
+    assert history.routes_removed == 0
+    assert history.bird_reloaded is False
 
 
 def test_run_once_reloads_bird_when_config_changed(
@@ -289,7 +306,8 @@ def test_run_once_reloads_bird_when_config_changed(
         FakeBirdControl,
     )
 
-    result = build_workflow(tmp_path).run("youtube")
+    workflow, database = build_workflow(tmp_path)
+    result = workflow.run("youtube")
 
     assert result.generated_changed is True
     assert result.installed_changed is True
@@ -298,8 +316,13 @@ def test_run_once_reloads_bird_when_config_changed(
     assert result.bird_reload_output == "Reconfigured"
     assert FakeInstaller.backup_removed is True
     assert FakeInstaller.rollback_called is False
+    assert len(snapshot_paths(tmp_path)) == 1
 
-    assert_single_snapshot(tmp_path)
+    history = CycleHistoryStore(database).latest()
+    assert history is not None
+    assert history.bird_reloaded is True
+    assert history.generated_changed is True
+    assert history.installed_changed is True
 
 
 def test_run_once_rolls_back_when_bird_reload_fails(
@@ -384,20 +407,20 @@ def test_run_once_rolls_back_when_bird_reload_fails(
         FakeBirdControl,
     )
 
+    workflow, database = build_workflow(tmp_path)
+
     with pytest.raises(
         RunOnceError,
         match="rollback completed",
     ):
-        build_workflow(tmp_path).run("youtube")
+        workflow.run("youtube")
 
     assert FakeInstaller.rollback_called is True
     assert FakeInstaller.backup_removed is False
     assert FakeBirdControl.configure_calls == 2
     assert FakeBirdControl.check_calls == 2
-
-    assert list(
-        (tmp_path / "plans").glob("*.json")
-    ) == []
+    assert snapshot_paths(tmp_path) == []
+    assert CycleHistoryStore(database).count() == 0
 
 
 def test_run_once_rejects_empty_route_plan(
@@ -421,12 +444,13 @@ def test_run_once_rejects_empty_route_plan(
         EmptyRoutePlanner,
     )
 
+    workflow, database = build_workflow(tmp_path)
+
     with pytest.raises(
         RunOnceError,
         match="Route plan is empty",
     ):
-        build_workflow(tmp_path).run("youtube")
+        workflow.run("youtube")
 
-    assert list(
-        (tmp_path / "plans").glob("*.json")
-    ) == []
+    assert snapshot_paths(tmp_path) == []
+    assert CycleHistoryStore(database).count() == 0

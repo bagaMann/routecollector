@@ -30,7 +30,9 @@ CREATE TABLE IF NOT EXISTS domains (
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(service_id, domain, source),
-    FOREIGN KEY(service_id) REFERENCES services(id) ON DELETE CASCADE
+    FOREIGN KEY(service_id)
+        REFERENCES services(id)
+        ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS observations (
@@ -44,7 +46,9 @@ CREATE TABLE IF NOT EXISTS observations (
     hits INTEGER NOT NULL DEFAULT 1,
     ttl INTEGER,
     confidence INTEGER NOT NULL DEFAULT 1,
-    FOREIGN KEY(domain_id) REFERENCES domains(id) ON DELETE SET NULL
+    FOREIGN KEY(domain_id)
+        REFERENCES domains(id)
+        ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS route_stats (
@@ -61,6 +65,26 @@ CREATE TABLE IF NOT EXISTS route_stats (
     first_seen TEXT,
     last_seen TEXT,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS cycle_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    duration_seconds REAL NOT NULL,
+    service_name TEXT,
+    services_synced INTEGER NOT NULL,
+    domains_synced INTEGER NOT NULL,
+    domains_resolved INTEGER NOT NULL,
+    observations_stored INTEGER NOT NULL,
+    route_stats_built INTEGER NOT NULL,
+    planned_routes INTEGER NOT NULL,
+    routes_added INTEGER NOT NULL DEFAULT 0,
+    routes_removed INTEGER NOT NULL DEFAULT 0,
+    generated_changed INTEGER NOT NULL DEFAULT 0,
+    installed_changed INTEGER NOT NULL DEFAULT 0,
+    bird_reloaded INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_domains_service_id
@@ -83,6 +107,12 @@ CREATE INDEX IF NOT EXISTS idx_route_stats_confidence
 
 CREATE INDEX IF NOT EXISTS idx_route_stats_last_seen
     ON route_stats(last_seen);
+
+CREATE INDEX IF NOT EXISTS idx_cycle_history_completed_at
+    ON cycle_history(completed_at);
+
+CREATE INDEX IF NOT EXISTS idx_cycle_history_service_name
+    ON cycle_history(service_name);
 """
 
 
@@ -125,20 +155,27 @@ class Database:
     def initialize(self) -> None:
         """Create database directory, schema and required migrations."""
 
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
         try:
             with self.connection() as conn:
                 conn.executescript(SCHEMA_SQL)
                 self._migrate_route_stats(conn)
-                conn.executescript(POST_MIGRATION_INDEXES_SQL)
+                conn.executescript(
+                    POST_MIGRATION_INDEXES_SQL
+                )
         except sqlite3.Error as exc:
             raise DatabaseError(
                 f"Failed to initialize database: {exc}"
             ) from exc
 
     @contextmanager
-    def connection(self) -> Iterator[sqlite3.Connection]:
+    def connection(
+        self,
+    ) -> Iterator[sqlite3.Connection]:
         """Open SQLite connection with transaction handling."""
 
         conn = sqlite3.connect(self.path)
@@ -155,7 +192,9 @@ class Database:
             conn.close()
 
     @staticmethod
-    def _migrate_route_stats(conn: sqlite3.Connection) -> None:
+    def _migrate_route_stats(
+        conn: sqlite3.Connection,
+    ) -> None:
         """Add missing route_stats columns to an existing database."""
 
         columns = {
@@ -165,6 +204,8 @@ class Database:
             ).fetchall()
         }
 
-        for column_name, migration_sql in ROUTE_STATS_MIGRATIONS.items():
+        for column_name, migration_sql in (
+            ROUTE_STATS_MIGRATIONS.items()
+        ):
             if column_name not in columns:
                 conn.execute(migration_sql)

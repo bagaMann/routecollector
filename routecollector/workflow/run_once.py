@@ -5,14 +5,20 @@ Single-run RouteCollector workflow.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
+from routecollector.core.database import Database
 from routecollector.core.repository import Repository
 from routecollector.exporter.bird import BirdExporter
 from routecollector.exporter.birdctl import (
     BirdConfigInstaller,
     BirdControl,
     BirdControlError,
+)
+from routecollector.history.cycle_history import (
+    CycleHistoryStore,
+    NewCycleHistoryEntry,
 )
 from routecollector.history.plan_snapshot import PlanSnapshotStore
 from routecollector.planner.planner import RoutePlanner
@@ -34,6 +40,8 @@ class RunOnceResult:
     observations_stored: int
     route_stats_built: int
     planned_routes: int
+    routes_added: int
+    routes_removed: int
     generated_config: Path
     generated_changed: bool
     installed_config: Path
@@ -42,6 +50,7 @@ class RunOnceResult:
     bird_reload_output: str | None
     bird_reloaded: bool
     rollback_performed: bool
+    duration_seconds: float
 
 
 class RunOnceWorkflow:
@@ -50,6 +59,7 @@ class RunOnceWorkflow:
     def __init__(
         self,
         repository: Repository,
+        database: Database,
         services_dir: Path,
         generated_config: Path,
         installed_config: Path,
@@ -66,6 +76,7 @@ class RunOnceWorkflow:
             )
 
         self._repository = repository
+        self._database = database
         self._services_dir = services_dir
         self._generated_config = generated_config
         self._installed_config = installed_config
@@ -81,6 +92,8 @@ class RunOnceWorkflow:
         service_name: str | None = None,
     ) -> RunOnceResult:
         """Execute a complete update cycle."""
+
+        started_at = datetime.now()
 
         sync_result = ServiceSourceSync(
             repository=self._repository,
@@ -162,10 +175,44 @@ class RunOnceWorkflow:
                 f"rollback completed: {exc}"
             ) from exc
 
-        # Save only a successfully validated and applied route plan.
-        PlanSnapshotStore(
+        snapshot_store = PlanSnapshotStore(
             self._snapshot_directory
-        ).save(routes)
+        )
+        snapshot_store.save(routes)
+
+        changes = snapshot_store.changes()
+        routes_added = (
+            len(changes.added)
+            if changes is not None
+            else 0
+        )
+        routes_removed = (
+            len(changes.removed)
+            if changes is not None
+            else 0
+        )
+
+        completed_at = datetime.now()
+
+        history_entry = NewCycleHistoryEntry(
+            started_at=started_at,
+            completed_at=completed_at,
+            service_name=service_name,
+            services_synced=services_synced,
+            domains_synced=domains_synced,
+            domains_resolved=domains_resolved,
+            observations_stored=observations_stored,
+            route_stats_built=route_stats_built,
+            planned_routes=len(routes),
+            routes_added=routes_added,
+            routes_removed=routes_removed,
+            generated_changed=export_result.changed,
+            installed_changed=install_result.changed,
+            bird_reloaded=bird_reloaded,
+        )
+        CycleHistoryStore(
+            self._database
+        ).add(history_entry)
 
         return RunOnceResult(
             services_synced=services_synced,
@@ -174,6 +221,8 @@ class RunOnceWorkflow:
             observations_stored=observations_stored,
             route_stats_built=route_stats_built,
             planned_routes=len(routes),
+            routes_added=routes_added,
+            routes_removed=routes_removed,
             generated_config=export_result.path,
             generated_changed=export_result.changed,
             installed_config=install_result.path,
@@ -182,4 +231,5 @@ class RunOnceWorkflow:
             bird_reload_output=bird_reload_output,
             bird_reloaded=bird_reloaded,
             rollback_performed=rollback_performed,
+            duration_seconds=history_entry.duration_seconds,
         )
