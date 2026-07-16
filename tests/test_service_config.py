@@ -1,8 +1,4 @@
-"""
-Tests for service configuration loader.
-"""
-
-from __future__ import annotations
+"""Tests for service configuration loader."""
 
 from pathlib import Path
 
@@ -14,27 +10,19 @@ from routecollector.parser.service_config import (
 )
 
 
-def test_service_config_loader_reads_yaml(tmp_path: Path) -> None:
-    """Loader must parse a valid service configuration."""
-
-    services_dir = tmp_path / "services"
-    services_dir.mkdir()
-
-    config_file = services_dir / "youtube.yaml"
-    config_file.write_text(
+def test_loader_translates_legacy_yaml(tmp_path: Path) -> None:
+    services = tmp_path / "services"
+    services.mkdir()
+    (services / "youtube.yaml").write_text(
         """
 name: youtube
-description: YouTube video platform
 enabled: true
-
 sources:
   - manual
   - domain-list-community
-
 domain_list_community:
   lists:
     - youtube
-
 domains:
   - youtube.com
   - googlevideo.com
@@ -42,52 +30,133 @@ domains:
         encoding="utf-8",
     )
 
-    loader = ServiceConfigLoader(services_dir)
-    configs = loader.load_all()
+    config = ServiceConfigLoader(services).load_all()[0]
 
-    assert len(configs) == 1
+    assert config.sources == [
+        "manual",
+        "domain-list-community",
+    ]
+    assert config.source_configs[0].options == {
+        "domains": ["youtube.com", "googlevideo.com"]
+    }
+    assert config.source_configs[1].options == {
+        "list": "youtube"
+    }
 
-    config = configs[0]
 
-    assert config.name == "youtube"
-    assert config.enabled is True
-    assert config.description == "YouTube video platform"
-    assert config.sources == ["manual", "domain-list-community"]
-    assert config.domain_list_community_lists == ["youtube"]
-    assert config.domains == ["youtube.com", "googlevideo.com"]
-
-
-def test_service_config_loader_rejects_missing_name(
-    tmp_path: Path,
-) -> None:
-    """Loader must reject a service configuration without a name."""
-
-    services_dir = tmp_path / "services"
-    services_dir.mkdir()
-
-    config_file = services_dir / "invalid.yaml"
-    config_file.write_text(
+def test_loader_reads_declarative_sources(tmp_path: Path) -> None:
+    services = tmp_path / "services"
+    services.mkdir()
+    (services / "youtube.yaml").write_text(
         """
-enabled: true
-domains:
-  - example.com
+name: youtube
+sources:
+  - type: manual
+    domains:
+      - youtube.com
+  - type: domain-list-community
+    options:
+      list: youtube
+      timeout: 15
+      max_depth: 5
 """.strip(),
         encoding="utf-8",
     )
 
-    loader = ServiceConfigLoader(services_dir)
+    config = ServiceConfigLoader(services).load_all()[0]
 
-    with pytest.raises(ServiceConfigError, match="Missing service name"):
-        loader.load_all()
+    assert config.sources == [
+        "manual",
+        "domain-list-community",
+    ]
+    assert config.source_configs[0].options == {
+        "domains": ["youtube.com"]
+    }
+    assert config.source_configs[1].options == {
+        "list": "youtube",
+        "timeout": 15,
+        "max_depth": 5,
+    }
 
 
-def test_service_config_loader_returns_empty_list_for_missing_directory(
+def test_loader_defaults_to_manual(tmp_path: Path) -> None:
+    services = tmp_path / "services"
+    services.mkdir()
+    (services / "example.yaml").write_text(
+        "name: example\ndomains:\n  - example.com\n",
+        encoding="utf-8",
+    )
+
+    config = ServiceConfigLoader(services).load_all()[0]
+    assert config.sources == ["manual"]
+    assert config.source_configs[0].options == {
+        "domains": ["example.com"]
+    }
+
+
+def test_loader_rejects_missing_name(tmp_path: Path) -> None:
+    services = tmp_path / "services"
+    services.mkdir()
+    (services / "invalid.yaml").write_text(
+        "domains:\n  - example.com\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ServiceConfigError,
+        match="Missing service name",
+    ):
+        ServiceConfigLoader(services).load_all()
+
+
+def test_loader_rejects_duplicate_sources(tmp_path: Path) -> None:
+    services = tmp_path / "services"
+    services.mkdir()
+    (services / "invalid.yaml").write_text(
+        """
+name: invalid
+sources:
+  - manual
+  - type: manual
+    domains:
+      - example.com
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ServiceConfigError,
+        match="Duplicate source type",
+    ):
+        ServiceConfigLoader(services).load_all()
+
+
+def test_loader_rejects_source_without_type(
     tmp_path: Path,
 ) -> None:
-    """Missing services directory must produce an empty result."""
+    services = tmp_path / "services"
+    services.mkdir()
+    (services / "invalid.yaml").write_text(
+        """
+name: invalid
+sources:
+  - options:
+      domains:
+        - example.com
+""".strip(),
+        encoding="utf-8",
+    )
 
-    services_dir = tmp_path / "missing"
+    with pytest.raises(
+        ServiceConfigError,
+        match="requires non-empty 'type'",
+    ):
+        ServiceConfigLoader(services).load_all()
 
-    loader = ServiceConfigLoader(services_dir)
 
-    assert loader.load_all() == []
+def test_loader_returns_empty_for_missing_dir(
+    tmp_path: Path,
+) -> None:
+    assert ServiceConfigLoader(
+        tmp_path / "missing"
+    ).load_all() == []

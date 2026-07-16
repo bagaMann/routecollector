@@ -16,7 +16,7 @@ from routecollector.exporter.bird import BirdExporter
 from routecollector.exporter.birdctl import BirdConfigInstaller, BirdControl
 from routecollector.history.cycle_history import CycleHistoryStore
 from routecollector.history.plan_snapshot import PlanSnapshotStore
-from routecollector.parser.service_config import ServiceConfigSync
+from routecollector.sources.service_source_sync import ServiceSourceSync
 from routecollector.planner.planner import PlannedRoute, RoutePlanner
 from routecollector.resolver.resolver import DnsResolver
 from routecollector.workflow.daemon import (
@@ -324,14 +324,14 @@ def command_sync(config_path: Path) -> int:
 
     assert app.repository is not None
 
-    services, domains = ServiceConfigSync(
+    result = ServiceSourceSync(
         repository=app.repository,
         services_dir=DEFAULT_SERVICES_DIR,
     ).sync()
 
     print("Service configuration synced")
-    print(f"Services: {services}")
-    print(f"Domains: {domains}")
+    print(f"Services: {result.service_count}")
+    print(f"Domains: {result.domain_count}")
 
     return 0
 
@@ -651,7 +651,7 @@ def command_run_once(
     print(f"Generated config:    {result.generated_config}")
     print(
         "Generated changed:   "
-        f"{'yes' if result.generated_changed else 'no'}"
+        + ("yes" if result.generated_changed else "no")
     )
     if result.dry_run:
         print("Installed config:    not modified")
@@ -805,7 +805,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.max_age_days,
             args.enable_ipv6,
             args.dry_run,
-    )
+        )
 
     if args.command == "daemon":
         return command_daemon(

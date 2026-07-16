@@ -1,6 +1,4 @@
-"""
-Synchronize service configurations through the pluggable SourceManager.
-"""
+"""Synchronize service configurations through SourceManager."""
 
 from __future__ import annotations
 
@@ -12,14 +10,14 @@ from routecollector.parser.service_config import (
     ServiceConfig,
     ServiceConfigLoader,
 )
-from routecollector.sources.default_registry import create_default_registry
+from routecollector.sources.default_registry import (
+    create_default_registry,
+)
 from routecollector.sources.manager import SourceManager
 
 
 @dataclass(slots=True, frozen=True)
 class ServiceSourceSyncResult:
-    """Synchronization result for one service."""
-
     service_name: str
     source_count: int
     domain_count: int
@@ -27,15 +25,13 @@ class ServiceSourceSyncResult:
 
 @dataclass(slots=True, frozen=True)
 class SourceSyncResult:
-    """Synchronization result for all configured services."""
-
     service_count: int
     domain_count: int
     services: tuple[ServiceSourceSyncResult, ...]
 
 
 class ServiceSourceSync:
-    """Synchronize service domains using registered source plugins."""
+    """Synchronize service domains using registered plugins."""
 
     def __init__(
         self,
@@ -50,40 +46,42 @@ class ServiceSourceSync:
         )
 
     def sync(self) -> SourceSyncResult:
-        """Load all service configs and synchronize their domains."""
-
         configs = ServiceConfigLoader(
             self._services_dir
         ).load_all()
 
-        service_results: list[ServiceSourceSyncResult] = []
+        results: list[ServiceSourceSyncResult] = []
         total_domains = 0
 
         for config in configs:
             result = self._sync_service(config)
-            service_results.append(result)
+            results.append(result)
             total_domains += result.domain_count
 
         return SourceSyncResult(
-            service_count=len(service_results),
+            service_count=len(results),
             domain_count=total_domains,
-            services=tuple(service_results),
+            services=tuple(results),
         )
 
     def _sync_service(
         self,
         config: ServiceConfig,
     ) -> ServiceSourceSyncResult:
-        """Synchronize one service configuration."""
-
         service_id = self._repository.upsert_service(
             name=config.name,
             description=config.description,
             enabled=config.enabled,
         )
 
-        source_names = self._resolve_source_names(config)
-        source_options = self._build_source_options(config)
+        source_names = [
+            source.type
+            for source in config.source_configs
+        ]
+        source_options = {
+            source.type: dict(source.options)
+            for source in config.source_configs
+        }
 
         merged = self._manager.load(
             service_name=config.name,
@@ -105,44 +103,3 @@ class ServiceSourceSync:
             source_count=len(merged.source_results),
             domain_count=len(merged.domains),
         )
-
-    @staticmethod
-    def _resolve_source_names(
-        config: ServiceConfig,
-    ) -> list[str]:
-        """Return normalized source names from service config."""
-
-        source_names = [
-            source.strip().lower()
-            for source in config.sources
-            if source.strip()
-        ]
-
-        return list(dict.fromkeys(source_names))
-
-    @staticmethod
-    def _build_source_options(
-        config: ServiceConfig,
-    ) -> dict[str, dict[str, object]]:
-        """Translate current service config into plugin options."""
-
-        options: dict[str, dict[str, object]] = {}
-
-        if "manual" in config.sources:
-            options["manual"] = {
-                "domains": list(config.domains),
-            }
-
-        if "domain-list-community" in config.sources:
-            lists = list(config.domain_list_community_lists)
-
-            if lists:
-                options["domain-list-community"] = {
-                    "list": lists[0],
-                }
-            else:
-                options["domain-list-community"] = {
-                    "list": config.name,
-                }
-
-        return options
