@@ -210,6 +210,27 @@ class Repository:
 
             return int(row["id"])
 
+    def deactivate_service_domains(
+        self,
+        service_id: int,
+    ) -> int:
+        """Deactivate every active domain row for one service."""
+
+        with self._database.connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE domains
+                SET
+                    active = 0,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE service_id = ?
+                  AND active = 1
+                """,
+                (service_id,),
+            )
+
+            return int(cursor.rowcount)
+
     def list_domains(
         self,
         service_name: str | None = None,
