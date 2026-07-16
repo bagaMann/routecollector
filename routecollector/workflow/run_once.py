@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Iterable
 
 from routecollector.core.database import Database
 from routecollector.core.repository import Repository
@@ -21,7 +22,7 @@ from routecollector.history.cycle_history import (
     NewCycleHistoryEntry,
 )
 from routecollector.history.plan_snapshot import PlanSnapshotStore
-from routecollector.planner.planner import RoutePlanner
+from routecollector.planner.planner import PlannedRoute, RoutePlanner
 from routecollector.resolver.resolver import DnsResolver
 from routecollector.sources.service_source_sync import ServiceSourceSync
 
@@ -44,13 +45,14 @@ class RunOnceResult:
     routes_removed: int
     generated_config: Path
     generated_changed: bool
-    installed_config: Path
+    installed_config: Path | None
     installed_changed: bool
-    bird_check_output: str
+    bird_check_output: str | None
     bird_reload_output: str | None
     bird_reloaded: bool
     rollback_performed: bool
     duration_seconds: float
+    dry_run: bool
 
 
 class RunOnceWorkflow:
@@ -69,6 +71,9 @@ class RunOnceWorkflow:
         max_age_days: int = 30,
         enable_ipv6: bool = False,
         snapshot_directory: Path = Path("state/plans"),
+        dry_run_config: Path = Path(
+            "state/dry-run/routecollector.conf"
+        ),
     ) -> None:
         if max_age_days <= 0:
             raise ValueError(
@@ -86,10 +91,12 @@ class RunOnceWorkflow:
         self._max_age_days = max_age_days
         self._enable_ipv6 = enable_ipv6
         self._snapshot_directory = snapshot_directory
+        self._dry_run_config = dry_run_config
 
     def run(
         self,
         service_name: str | None = None,
+        dry_run: bool = False,
     ) -> RunOnceResult:
         """Execute a complete update cycle."""
 
@@ -122,6 +129,17 @@ class RunOnceWorkflow:
             raise RunOnceError(
                 "Route plan is empty; refusing to replace "
                 "BIRD configuration"
+            )
+
+        if dry_run:
+            return self._complete_dry_run(
+                routes=routes,
+                started_at=started_at,
+                services_synced=services_synced,
+                domains_synced=domains_synced,
+                domains_resolved=domains_resolved,
+                observations_stored=observations_stored,
+                route_stats_built=route_stats_built,
             )
 
         export_result = BirdExporter(
@@ -232,4 +250,80 @@ class RunOnceWorkflow:
             bird_reloaded=bird_reloaded,
             rollback_performed=rollback_performed,
             duration_seconds=history_entry.duration_seconds,
+            dry_run=False,
+        )
+
+    def _complete_dry_run(
+        self,
+        routes: Iterable[PlannedRoute],
+        started_at: datetime,
+        services_synced: int,
+        domains_synced: int,
+        domains_resolved: int,
+        observations_stored: int,
+        route_stats_built: int,
+    ) -> RunOnceResult:
+        """Generate preview output without publishing routes."""
+
+        route_list = list(routes)
+        export_result = BirdExporter(
+            self._dry_run_config
+        ).export(route_list)
+
+        routes_added, routes_removed = (
+            self._compare_with_latest_snapshot(route_list)
+        )
+
+        completed_at = datetime.now()
+        duration_seconds = max(
+            0.0,
+            (completed_at - started_at).total_seconds(),
+        )
+
+        return RunOnceResult(
+            services_synced=services_synced,
+            domains_synced=domains_synced,
+            domains_resolved=domains_resolved,
+            observations_stored=observations_stored,
+            route_stats_built=route_stats_built,
+            planned_routes=len(route_list),
+            routes_added=routes_added,
+            routes_removed=routes_removed,
+            generated_config=export_result.path,
+            generated_changed=export_result.changed,
+            installed_config=None,
+            installed_changed=False,
+            bird_check_output=None,
+            bird_reload_output=None,
+            bird_reloaded=False,
+            rollback_performed=False,
+            duration_seconds=duration_seconds,
+            dry_run=True,
+        )
+
+    def _compare_with_latest_snapshot(
+        self,
+        routes: Iterable[PlannedRoute],
+    ) -> tuple[int, int]:
+        """Compare preview routes with latest published snapshot."""
+
+        latest = PlanSnapshotStore(
+            self._snapshot_directory
+        ).latest()
+
+        if latest is None:
+            return 0, 0
+
+        previous_keys = {
+            (route.family, route.prefix)
+            for route in latest.routes
+        }
+        current_keys = {
+            (route.family, route.prefix)
+            for route in routes
+        }
+
+        return (
+            len(current_keys - previous_keys),
+            len(previous_keys - current_keys),
         )

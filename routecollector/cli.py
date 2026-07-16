@@ -180,6 +180,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional service name",
     )
+    run_once_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Build a preview without installing or reloading "
+            "BIRD configuration"
+        ),
+    )
     add_route_policy_arguments(run_once_parser)
 
     daemon_parser = subparsers.add_parser(
@@ -609,6 +617,7 @@ def command_run_once(
     min_confidence_ipv6: int,
     max_age_days: int,
     enable_ipv6: bool,
+    dry_run: bool,
 ) -> int:
     """Execute one complete update cycle."""
 
@@ -620,9 +629,15 @@ def command_run_once(
         min_confidence_ipv6,
         max_age_days,
         enable_ipv6,
-    ).run(service_name)
+    ).run(
+        service_name,
+        dry_run=dry_run,
+    )
 
-    print("RouteCollector cycle completed")
+    if result.dry_run:
+        print("RouteCollector dry run completed")
+    else:
+        print("RouteCollector cycle completed")
     print()
     print(f"Services synced:     {result.services_synced}")
     print(f"Domains synced:      {result.domains_synced}")
@@ -638,21 +653,37 @@ def command_run_once(
         "Generated changed:   "
         f"{'yes' if result.generated_changed else 'no'}"
     )
+    if result.dry_run:
+        print("Installed config:    not modified")
+        print("Installed changed:   no")
+        print()
+        print("BIRD configuration was not installed.")
+        print("BIRD was not reloaded.")
+        print(
+            "Snapshot and cycle history were not modified."
+        )
+        return 0
+
     print(f"Installed config:    {result.installed_config}")
     print(
         "Installed changed:   "
-        f"{'yes' if result.installed_changed else 'no'}"
+        + ("yes" if result.installed_changed else "no")
     )
     print()
     print(result.bird_check_output)
-    print()
 
     if result.bird_reloaded:
-        print("BIRD configuration was reloaded automatically.")
-    elif result.installed_changed:
-        print("BIRD configuration changed but was not reloaded.")
+        print()
+        print(
+            "BIRD configuration was reloaded "
+            "automatically."
+        )
     else:
-        print("No BIRD route changes detected; reload is not required.")
+        print()
+        print(
+            "No BIRD route changes detected; "
+            "reload is not required."
+        )
 
     return 0
 
@@ -732,6 +763,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.min_confidence_ipv6,
             args.max_age_days,
             args.enable_ipv6,
+            args.dry_run,
         )
 
     if args.command == "stats":
@@ -772,7 +804,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.min_confidence_ipv6,
             args.max_age_days,
             args.enable_ipv6,
-        )
+            args.dry_run,
+    )
 
     if args.command == "daemon":
         return command_daemon(

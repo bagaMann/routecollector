@@ -127,6 +127,7 @@ def build_workflow(
         installed_config=tmp_path / "installed.conf",
         main_bird_config=tmp_path / "bird.conf",
         snapshot_directory=tmp_path / "plans",
+        dry_run_config=tmp_path / "dry-run" / "routecollector.conf",
     )
 
     return workflow, database
@@ -452,5 +453,83 @@ def test_run_once_rejects_empty_route_plan(
     ):
         workflow.run("youtube")
 
+    assert snapshot_paths(tmp_path) == []
+    assert CycleHistoryStore(database).count() == 0
+
+
+def test_run_once_dry_run_does_not_publish_or_store_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dry run must not install BIRD config or persist history."""
+
+    patch_common_components(monkeypatch)
+
+    class FakeExporter:
+        def __init__(self, output_file: Path) -> None:
+            self._output_file = output_file
+
+        def export(
+            self,
+            routes: list[Any],
+        ) -> SimpleNamespace:
+            assert len(routes) == 1
+            self._output_file.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            self._output_file.write_text(
+                "preview",
+                encoding="utf-8",
+            )
+            return SimpleNamespace(
+                path=self._output_file,
+                changed=True,
+            )
+
+    class ForbiddenInstaller:
+        def __init__(self, **_: Any) -> None:
+            raise AssertionError(
+                "Dry run must not construct BirdConfigInstaller"
+            )
+
+    class ForbiddenBirdControl:
+        def __init__(self) -> None:
+            raise AssertionError(
+                "Dry run must not construct BirdControl"
+            )
+
+    monkeypatch.setattr(
+        workflow_module,
+        "BirdExporter",
+        FakeExporter,
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "BirdConfigInstaller",
+        ForbiddenInstaller,
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "BirdControl",
+        ForbiddenBirdControl,
+    )
+
+    workflow, database = build_workflow(tmp_path)
+    result = workflow.run(
+        "youtube",
+        dry_run=True,
+    )
+
+    assert result.dry_run is True
+    assert result.generated_config == (
+        tmp_path / "dry-run" / "routecollector.conf"
+    )
+    assert result.generated_changed is True
+    assert result.installed_config is None
+    assert result.installed_changed is False
+    assert result.bird_reloaded is False
+    assert result.routes_added == 0
+    assert result.routes_removed == 0
     assert snapshot_paths(tmp_path) == []
     assert CycleHistoryStore(database).count() == 0
