@@ -1,4 +1,6 @@
-"""Synchronize service configurations through SourceManager."""
+"""
+Synchronize service configurations through the pluggable SourceManager.
+"""
 
 from __future__ import annotations
 
@@ -18,20 +20,26 @@ from routecollector.sources.manager import SourceManager
 
 @dataclass(slots=True, frozen=True)
 class ServiceSourceSyncResult:
+    """Synchronization result for one service."""
+
     service_name: str
     source_count: int
     domain_count: int
+    deactivated_count: int
 
 
 @dataclass(slots=True, frozen=True)
 class SourceSyncResult:
+    """Synchronization result for all configured services."""
+
     service_count: int
     domain_count: int
+    deactivated_count: int
     services: tuple[ServiceSourceSyncResult, ...]
 
 
 class ServiceSourceSync:
-    """Synchronize service domains using registered plugins."""
+    """Synchronize service domains using registered source plugins."""
 
     def __init__(
         self,
@@ -46,33 +54,41 @@ class ServiceSourceSync:
         )
 
     def sync(self) -> SourceSyncResult:
+        """Load all service configs and synchronize their domains."""
+
         configs = ServiceConfigLoader(
             self._services_dir
         ).load_all()
 
-        results: list[ServiceSourceSyncResult] = []
+        service_results: list[
+            ServiceSourceSyncResult
+        ] = []
         total_domains = 0
+        total_deactivated = 0
 
         for config in configs:
             result = self._sync_service(config)
-            results.append(result)
+            service_results.append(result)
             total_domains += result.domain_count
+            total_deactivated += result.deactivated_count
 
         return SourceSyncResult(
-            service_count=len(results),
+            service_count=len(service_results),
             domain_count=total_domains,
-            services=tuple(results),
+            deactivated_count=total_deactivated,
+            services=tuple(service_results),
         )
 
     def _sync_service(
         self,
         config: ServiceConfig,
     ) -> ServiceSourceSyncResult:
-        service_id = self._repository.upsert_service(
-            name=config.name,
-            description=config.description,
-            enabled=config.enabled,
-        )
+        """
+        Synchronize one service configuration.
+
+        Sources are loaded before existing rows are deactivated. Therefore,
+        a plugin failure leaves the previously active domain set untouched.
+        """
 
         source_names = [
             source.type
@@ -89,6 +105,18 @@ class ServiceSourceSync:
             source_options=source_options,
         )
 
+        service_id = self._repository.upsert_service(
+            name=config.name,
+            description=config.description,
+            enabled=config.enabled,
+        )
+
+        deactivated_count = (
+            self._repository.deactivate_service_domains(
+                service_id
+            )
+        )
+
         for item in merged.domains:
             for source_name in sorted(item.sources):
                 self._repository.upsert_domain(
@@ -102,4 +130,5 @@ class ServiceSourceSync:
             service_name=config.name,
             source_count=len(merged.source_results),
             domain_count=len(merged.domains),
+            deactivated_count=deactivated_count,
         )
