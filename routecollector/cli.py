@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
+from time import monotonic
 from typing import Sequence
 
 from routecollector import __version__
@@ -327,23 +328,89 @@ def command_init(config_path: Path) -> int:
 
 
 def command_sync(config_path: Path) -> int:
-    """Synchronize service configuration."""
+    """Synchronize service configuration and print a detailed report."""
 
     app = get_app(config_path)
 
     assert app.repository is not None
+
+    started_at = monotonic()
 
     result = ServiceSourceSync(
         repository=app.repository,
         services_dir=DEFAULT_SERVICES_DIR,
     ).sync()
 
-    print("Service configuration synced")
-    print(f"Services: {result.service_count}")
-    print(f"Domains: {result.domain_count}")
+    duration_seconds = max(
+        0.0,
+        monotonic() - started_at,
+    )
+
+    print("Service synchronization completed")
+    print()
+
+    if not result.services:
+        print("No configured services were synchronized.")
+        print()
+
+    for service in result.services:
+        state = "enabled" if service.enabled else "disabled"
+        print(f"{service.service_name} [{state}]")
+        print("-" * (len(service.service_name) + len(state) + 3))
+
+        source_width = max(
+            (
+                len(source.source_name)
+                for source in service.sources
+            ),
+            default=0,
+        )
+
+        for source in service.sources:
+            print(
+                f"  {source.source_name:<{source_width}}  "
+                f"{source.domain_count:>6} domains"
+            )
+
+        print()
+        print(
+            f"  Merged domains       : "
+            f"{service.domain_count}"
+        )
+        print(
+            f"  Rows deactivated     : "
+            f"{service.deactivated_count}"
+        )
+        print()
+
+    print("Summary")
+    print("-------")
+    print(
+        f"Configured services   : "
+        f"{result.service_count}"
+    )
+    print(
+        f"Disabled services     : "
+        f"{result.disabled_service_count}"
+    )
+    print(
+        f"Source plugins        : "
+        f"{result.source_count}"
+    )
+    print(
+        f"Merged domains        : "
+        f"{result.domain_count}"
+    )
+    print(
+        f"Rows deactivated      : "
+        f"{result.deactivated_count}"
+    )
+    print(
+        f"Duration              : "
+        f"{duration_seconds:.2f}s"
+    )
 
     return 0
-
 
 
 def command_sources(
