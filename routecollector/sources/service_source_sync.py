@@ -8,19 +8,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from routecollector.core.repository import Repository
-from routecollector.parser.service_config import (
-    ServiceConfig,
-    ServiceConfigLoader,
-)
-from routecollector.sources.default_registry import (
-    create_default_registry,
-)
+from routecollector.parser.service_config import ServiceConfig, ServiceConfigLoader
+from routecollector.sources.default_registry import create_default_registry
 from routecollector.sources.manager import SourceManager
 
 
 @dataclass(slots=True, frozen=True)
 class ServiceSourceSyncResult:
-    """Synchronization result for one service."""
+    """Synchronization result for one configured service."""
 
     service_name: str
     source_count: int
@@ -30,11 +25,12 @@ class ServiceSourceSyncResult:
 
 @dataclass(slots=True, frozen=True)
 class SourceSyncResult:
-    """Synchronization result for all configured services."""
+    """Synchronization result for all service configurations."""
 
     service_count: int
     domain_count: int
     deactivated_count: int
+    disabled_service_count: int
     services: tuple[ServiceSourceSyncResult, ...]
 
 
@@ -49,22 +45,16 @@ class ServiceSourceSync:
     ) -> None:
         self._repository = repository
         self._services_dir = services_dir
-        self._manager = manager or SourceManager(
-            create_default_registry()
-        )
+        self._manager = manager or SourceManager(create_default_registry())
 
     def sync(self) -> SourceSyncResult:
-        """Load all service configs and synchronize their domains."""
+        """Synchronize configured services and disable removed ones."""
 
-        configs = ServiceConfigLoader(
-            self._services_dir
-        ).load_all()
-
-        service_results: list[
-            ServiceSourceSyncResult
-        ] = []
+        configs = ServiceConfigLoader(self._services_dir).load_all()
+        service_results: list[ServiceSourceSyncResult] = []
         total_domains = 0
         total_deactivated = 0
+        configured_names = {config.name for config in configs}
 
         for config in configs:
             result = self._sync_service(config)
@@ -72,10 +62,16 @@ class ServiceSourceSync:
             total_domains += result.domain_count
             total_deactivated += result.deactivated_count
 
+        disabled_service_count, removed_domains = self._disable_missing_services(
+            configured_names
+        )
+        total_deactivated += removed_domains
+
         return SourceSyncResult(
             service_count=len(service_results),
             domain_count=total_domains,
             deactivated_count=total_deactivated,
+            disabled_service_count=disabled_service_count,
             services=tuple(service_results),
         )
 
@@ -90,10 +86,7 @@ class ServiceSourceSync:
         a plugin failure leaves the previously active domain set untouched.
         """
 
-        source_names = [
-            source.type
-            for source in config.source_configs
-        ]
+        source_names = [source.type for source in config.source_configs]
         source_options = {
             source.type: dict(source.options)
             for source in config.source_configs
@@ -111,10 +104,8 @@ class ServiceSourceSync:
             enabled=config.enabled,
         )
 
-        deactivated_count = (
-            self._repository.deactivate_service_domains(
-                service_id
-            )
+        deactivated_count = self._repository.deactivate_service_domains(
+            service_id
         )
 
         for item in merged.domains:
@@ -132,3 +123,30 @@ class ServiceSourceSync:
             domain_count=len(merged.domains),
             deactivated_count=deactivated_count,
         )
+
+    def _disable_missing_services(
+        self,
+        configured_names: set[str],
+    ) -> tuple[int, int]:
+        """Disable services no longer represented by YAML files."""
+
+        disabled_service_count = 0
+        deactivated_domain_count = 0
+
+        for service in self._repository.list_services():
+            if service.name in configured_names:
+                continue
+
+            if service.enabled:
+                self._repository.upsert_service(
+                    name=service.name,
+                    description=service.description,
+                    enabled=False,
+                )
+                disabled_service_count += 1
+
+            deactivated_domain_count += (
+                self._repository.deactivate_service_domains(service.id)
+            )
+
+        return disabled_service_count, deactivated_domain_count
