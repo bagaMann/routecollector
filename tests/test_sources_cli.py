@@ -8,17 +8,46 @@ from typing import Any
 import routecollector.cli as cli_module
 from routecollector.sources.status import (
     ConfiguredSourceUsage,
+    SourcePluginInfo,
     SourceStatus,
     collect_source_status,
 )
 
 
-def test_collect_source_status_lists_plugins_and_usage(tmp_path: Path) -> None:
-    """Status collector must report registry and YAML usage."""
+def example_status() -> SourceStatus:
+    return SourceStatus(
+        plugins=(
+            SourcePluginInfo(
+                name="manual",
+                origin="built-in",
+                package_name="routecollector",
+                package_version="core",
+                entry_point=None,
+            ),
+            SourcePluginInfo(
+                name="example",
+                origin="external",
+                package_name="routecollector-source-example",
+                package_version="0.1.0",
+                entry_point="routecollector_source_example:ExampleSource",
+            ),
+        ),
+        configured_usage=(
+            ConfiguredSourceUsage(
+                service_name="youtube",
+                enabled=True,
+                source_names=("manual",),
+            ),
+        ),
+    )
 
+
+def test_collect_source_status_lists_plugins_and_usage(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
     services_dir = tmp_path / "services"
     services_dir.mkdir()
-
     (services_dir / "youtube.yaml").write_text(
         """
 name: youtube
@@ -27,106 +56,68 @@ sources:
   - type: manual
     domains:
       - youtube.com
-  - type: http-text
-    url: https://example.test/youtube.txt
 """.strip(),
         encoding="utf-8",
     )
-    (services_dir / "disabled.yaml").write_text(
-        """
-name: disabled
-enabled: false
-sources:
-  - type: manual
-    domains:
-      - disabled.example
-""".strip(),
-        encoding="utf-8",
+
+    monkeypatch.setattr(
+        "routecollector.sources.status.discover_external_plugins",
+        lambda: (),
     )
 
     status = collect_source_status(services_dir)
 
-    assert status.built_in_sources == (
-        "domain-list-community",
-        "http-text",
-        "manual",
+    assert any(
+        plugin.name == "manual" and plugin.origin == "built-in"
+        for plugin in status.plugins
     )
     assert status.configured_usage == (
-        ConfiguredSourceUsage("disabled", False, ("manual",)),
-        ConfiguredSourceUsage("youtube", True, ("manual", "http-text")),
+        ConfiguredSourceUsage("youtube", True, ("manual",)),
     )
 
 
-def test_command_sources_prints_builtins_and_usage(
+def test_command_sources_prints_available_plugins(
     monkeypatch: Any,
     capsys: Any,
 ) -> None:
-    """CLI must show built-in plugins and configured services."""
-
     monkeypatch.setattr(
         cli_module,
         "collect_source_status",
-        lambda _: SourceStatus(
-            built_in_sources=(
-                "domain-list-community",
-                "http-text",
-                "manual",
-            ),
-            configured_usage=(
-                ConfiguredSourceUsage(
-                    "youtube",
-                    True,
-                    ("manual", "domain-list-community"),
-                ),
-                ConfiguredSourceUsage(
-                    "old-service",
-                    False,
-                    ("http-text",),
-                ),
-            ),
-        ),
+        lambda _: example_status(),
     )
 
     result = cli_module.command_sources()
     output = capsys.readouterr().out
 
     assert result == 0
-    assert "Built-in sources" in output
-    assert "domain-list-community" in output
-    assert "http-text" in output
+    assert "Available sources" in output
     assert "manual" in output
+    assert "built-in" in output
+    assert "example" in output
+    assert "external" in output
     assert "Configured usage" in output
-    assert "youtube" in output
-    assert "manual, domain-list-community" in output
-    assert "old-service" in output
-    assert "disabled" in output
 
 
-def test_command_sources_handles_empty_configuration(
+def test_command_plugin_info_prints_metadata(
     monkeypatch: Any,
     capsys: Any,
 ) -> None:
-    """CLI must explain when no service YAML is configured."""
-
     monkeypatch.setattr(
         cli_module,
         "collect_source_status",
-        lambda _: SourceStatus(
-            built_in_sources=("manual",),
-            configured_usage=(),
-        ),
+        lambda _: example_status(),
     )
 
-    result = cli_module.command_sources()
+    result = cli_module.command_plugin_info()
     output = capsys.readouterr().out
 
     assert result == 0
-    assert "manual" in output
-    assert "No service sources are configured." in output
+    assert "Source plugin information" in output
+    assert "routecollector-source-example" in output
+    assert "0.1.0" in output
+    assert "routecollector_source_example:ExampleSource" in output
 
 
-def test_parser_accepts_sources_command() -> None:
-    """Argument parser must expose the sources command."""
-
-    args = cli_module.build_parser().parse_args(["sources"])
-    assert args.command == "sources"
+def test_parser_accepts_plugin_info_command() -> None:
+    args = cli_module.build_parser().parse_args(["plugin-info"])
+    assert args.command == "plugin-info"

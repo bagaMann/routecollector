@@ -113,6 +113,10 @@ def build_parser() -> argparse.ArgumentParser:
         "sources",
         help="Show source plugins and configured usage",
     )
+    subparsers.add_parser(
+        "plugin-info",
+        help="Show detailed source plugin metadata",
+    )
 
     resolve_parser = subparsers.add_parser(
         "resolve",
@@ -345,15 +349,26 @@ def command_sync(config_path: Path) -> int:
 def command_sources(
     services_dir: Path = DEFAULT_SERVICES_DIR,
 ) -> int:
-    """Print built-in plugins and configured source usage."""
+    """Print available plugins and configured source usage."""
 
     status = collect_source_status(services_dir)
 
-    print("Built-in sources")
-    print("----------------")
+    print("Available sources")
+    print("-----------------")
 
-    for source_name in status.built_in_sources:
-        print(source_name)
+    if not status.plugins:
+        print("No source plugins are available.")
+    else:
+        name_width = max(
+            len(plugin.name)
+            for plugin in status.plugins
+        )
+
+        for plugin in status.plugins:
+            print(
+                f"{plugin.name:<{name_width}}  "
+                f"{plugin.origin}"
+            )
 
     print()
     print("Configured usage")
@@ -378,6 +393,40 @@ def command_sources(
         print(
             f"{item.service_name:<{service_width}} "
             f"[{state}] : {source_names}"
+        )
+
+    return 0
+
+
+def command_plugin_info(
+    services_dir: Path = DEFAULT_SERVICES_DIR,
+) -> int:
+    """Print detailed metadata for every available source plugin."""
+
+    status = collect_source_status(services_dir)
+
+    print("Source plugin information")
+    print("=========================")
+
+    if not status.plugins:
+        print()
+        print("No source plugins are available.")
+        return 0
+
+    for plugin in status.plugins:
+        print()
+        print(plugin.name)
+        print("-" * len(plugin.name))
+        print(f"Origin      : {plugin.origin}")
+        print(f"Package     : {plugin.package_name}")
+        print(f"Version     : {plugin.package_version}")
+        print(
+            "Entry point : "
+            + (
+                plugin.entry_point
+                if plugin.entry_point is not None
+                else "built into RouteCollector"
+            )
         )
 
     return 0
@@ -798,6 +847,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "sources":
         return command_sources()
+
+    if args.command == "plugin-info":
+        return command_plugin_info()
 
     if args.command == "resolve":
         return command_resolve(
