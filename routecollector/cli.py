@@ -17,6 +17,7 @@ from routecollector.exporter.birdctl import BirdConfigInstaller, BirdControl
 from routecollector.history.cycle_history import CycleHistoryStore
 from routecollector.history.plan_snapshot import PlanSnapshotStore
 from routecollector.sources.service_source_sync import ServiceSourceSync
+from routecollector.sources.status import collect_source_status
 from routecollector.planner.planner import PlannedRoute, RoutePlanner
 from routecollector.resolver.resolver import DnsResolver
 from routecollector.workflow.daemon import (
@@ -107,6 +108,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "sync",
         help="Synchronize service configuration",
+    )
+    subparsers.add_parser(
+        "sources",
+        help="Show source plugins and configured usage",
     )
 
     resolve_parser = subparsers.add_parser(
@@ -332,6 +337,48 @@ def command_sync(config_path: Path) -> int:
     print("Service configuration synced")
     print(f"Services: {result.service_count}")
     print(f"Domains: {result.domain_count}")
+
+    return 0
+
+
+
+def command_sources(
+    services_dir: Path = DEFAULT_SERVICES_DIR,
+) -> int:
+    """Print built-in plugins and configured source usage."""
+
+    status = collect_source_status(services_dir)
+
+    print("Built-in sources")
+    print("----------------")
+
+    for source_name in status.built_in_sources:
+        print(source_name)
+
+    print()
+    print("Configured usage")
+    print("----------------")
+
+    if not status.configured_usage:
+        print("No service sources are configured.")
+        return 0
+
+    service_width = max(
+        len(item.service_name)
+        for item in status.configured_usage
+    )
+
+    for item in status.configured_usage:
+        state = "enabled" if item.enabled else "disabled"
+        source_names = (
+            ", ".join(item.source_names)
+            if item.source_names
+            else "(none)"
+        )
+        print(
+            f"{item.service_name:<{service_width}} "
+            f"[{state}] : {source_names}"
+        )
 
     return 0
 
@@ -748,6 +795,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "sync":
         return command_sync(args.config)
+
+    if args.command == "sources":
+        return command_sources()
 
     if args.command == "resolve":
         return command_resolve(
