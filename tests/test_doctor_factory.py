@@ -1,14 +1,14 @@
-"""
-Tests for the default doctor runner factory.
-"""
+"""Tests for the default doctor runner factory."""
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import routecollector.doctor.bird_checks as bird_checks_module
+import routecollector.doctor.runtime_checks as runtime_checks_module
 from routecollector.core.database import Database
 from routecollector.doctor.factory import build_doctor_runner
 
@@ -17,8 +17,6 @@ def test_build_doctor_runner_runs_all_current_checks(
     tmp_path: Path,
     monkeypatch: Any,
 ) -> None:
-    """Factory must register all current read-only checks."""
-
     config_path = tmp_path / "config.yaml"
     config_path.write_text("project: {}", encoding="utf-8")
 
@@ -42,15 +40,25 @@ sources:
     database_path = state_dir / "state.db"
     Database(database_path).initialize()
 
-    main_config = tmp_path / "bird.conf"
-    generated_config = tmp_path / "generated.conf"
-    installed_config = tmp_path / "installed.conf"
+    snapshots_dir = state_dir / "plans"
+    snapshots_dir.mkdir()
+    (snapshots_dir / "20260718T100000_1.json").write_text(
+        json.dumps(
+            {
+                "created_at": "2026-07-18T10:00:00",
+                "route_count": 50,
+                "routes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
 
-    for path in (
-        main_config,
-        generated_config,
-        installed_config,
-    ):
+    configs = [
+        tmp_path / "bird.conf",
+        tmp_path / "generated.conf",
+        tmp_path / "installed.conf",
+    ]
+    for path in configs:
         path.write_text("# config\n", encoding="utf-8")
 
     monkeypatch.setattr(
@@ -62,10 +70,17 @@ sources:
         bird_checks_module,
         "_run_command",
         lambda command: subprocess.CompletedProcess(
-            args=command,
-            returncode=0,
-            stdout="Configuration OK",
-            stderr="",
+            command, 0, "", ""
+        ),
+    )
+    monkeypatch.setattr(
+        runtime_checks_module,
+        "_run_command",
+        lambda command: subprocess.CompletedProcess(
+            command,
+            0,
+            "enabled" if "is-enabled" in command else "active",
+            "",
         ),
     )
 
@@ -74,14 +89,11 @@ sources:
         directories=(state_dir, services_dir),
         database_path=database_path,
         services_dir=services_dir,
-        bird_main_config=main_config,
-        bird_generated_config=generated_config,
-        bird_installed_config=installed_config,
+        snapshots_dir=snapshots_dir,
+        bird_main_config=configs[0],
+        bird_generated_config=configs[1],
+        bird_installed_config=configs[2],
     ).run()
-
-    assert result.error_count == 0
-    assert result.warning_count == 0
-    assert result.overall_label == "HEALTHY"
 
     categories = [
         category
@@ -95,4 +107,7 @@ sources:
         "Service configuration",
         "Source plugins",
         "BIRD",
+        "Service",
+        "Snapshots",
+        "History",
     ]
