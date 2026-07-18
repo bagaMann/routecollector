@@ -27,7 +27,7 @@ def check_bird(
     installed_config: Path,
     runner: CommandRunner | None = None,
 ) -> tuple[DoctorCheck, ...]:
-    """Check BIRD binaries, config files and configure validation."""
+    """Check BIRD binaries, config files and parse validation."""
 
     command_runner = runner or _run_command
     checks: list[DoctorCheck] = []
@@ -68,13 +68,13 @@ def check_bird(
         )
     )
 
-    if birdc_path is None:
+    if bird_path is None:
         checks.append(
             DoctorCheck(
                 category="BIRD",
-                name="Configure check",
+                name="Configuration parse",
                 status=DoctorStatus.ERROR,
-                message="birdc is unavailable",
+                message="bird is unavailable",
             )
         )
         return tuple(checks)
@@ -83,7 +83,7 @@ def check_bird(
         checks.append(
             DoctorCheck(
                 category="BIRD",
-                name="Configure check",
+                name="Configuration parse",
                 status=DoctorStatus.ERROR,
                 message=f"main config unavailable: {main_config}",
             )
@@ -93,18 +93,17 @@ def check_bird(
     try:
         result = command_runner(
             (
-                birdc_path,
+                bird_path,
+                "-p",
                 "-c",
                 str(main_config),
-                "configure",
-                "check",
             )
         )
     except OSError as exc:
         checks.append(
             DoctorCheck(
                 category="BIRD",
-                name="Configure check",
+                name="Configuration parse",
                 status=DoctorStatus.ERROR,
                 message=str(exc),
             )
@@ -117,7 +116,7 @@ def check_bird(
         checks.append(
             DoctorCheck(
                 category="BIRD",
-                name="Configure check",
+                name="Configuration parse",
                 status=DoctorStatus.OK,
                 message=output or "configuration accepted",
             )
@@ -126,10 +125,10 @@ def check_bird(
         checks.append(
             DoctorCheck(
                 category="BIRD",
-                name="Configure check",
+                name="Configuration parse",
                 status=DoctorStatus.ERROR,
                 message=output or (
-                    f"birdc exited with code {result.returncode}"
+                    f"bird exited with code {result.returncode}"
                 ),
             )
         )
@@ -195,7 +194,7 @@ def _check_config_file(
 def _run_command(
     command: Sequence[str],
 ) -> subprocess.CompletedProcess[str]:
-    """Run one read-only BIRD command."""
+    """Run one read-only BIRD configuration parse."""
 
     return subprocess.run(
         list(command),

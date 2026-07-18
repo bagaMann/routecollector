@@ -49,7 +49,7 @@ def test_check_bird_reports_healthy_state(
         return subprocess.CompletedProcess(
             args=command,
             returncode=0,
-            stdout="BIRD 2.17.5 ready.\nConfiguration OK\n",
+            stdout="",
             stderr="",
         )
 
@@ -66,15 +66,16 @@ def test_check_bird_reports_healthy_state(
     assert by_name["Main configuration"].status is DoctorStatus.OK
     assert by_name["Generated configuration"].status is DoctorStatus.OK
     assert by_name["Installed configuration"].status is DoctorStatus.OK
-    assert by_name["Configure check"].status is DoctorStatus.OK
-    assert "Configuration OK" in by_name["Configure check"].message
+    assert by_name["Configuration parse"].status is DoctorStatus.OK
+    assert by_name["Configuration parse"].message == (
+        "configuration accepted"
+    )
     assert commands == [
         (
-            "/usr/sbin/birdc",
+            "/usr/sbin/bird",
+            "-p",
             "-c",
             str(main),
-            "configure",
-            "check",
         )
     ]
 
@@ -102,8 +103,8 @@ def test_check_bird_reports_missing_binaries(
 
     assert by_name["bird"].status is DoctorStatus.ERROR
     assert by_name["birdc"].status is DoctorStatus.ERROR
-    assert by_name["Configure check"].status is DoctorStatus.ERROR
-    assert "birdc is unavailable" in by_name["Configure check"].message
+    assert by_name["Configuration parse"].status is DoctorStatus.ERROR
+    assert "bird is unavailable" in by_name["Configuration parse"].message
 
 
 def test_check_bird_warns_for_missing_generated_config(
@@ -132,7 +133,7 @@ def test_check_bird_warns_for_missing_generated_config(
         runner=lambda command: subprocess.CompletedProcess(
             args=command,
             returncode=0,
-            stdout="Configuration OK",
+            stdout="",
             stderr="",
         ),
     )
@@ -142,14 +143,14 @@ def test_check_bird_warns_for_missing_generated_config(
         by_name["Generated configuration"].status
         is DoctorStatus.WARNING
     )
-    assert by_name["Configure check"].status is DoctorStatus.OK
+    assert by_name["Configuration parse"].status is DoctorStatus.OK
 
 
 def test_check_bird_reports_rejected_configuration(
     tmp_path: Path,
     monkeypatch: Any,
 ) -> None:
-    """Rejected configure check must be an error."""
+    """Rejected configuration parse must be an error."""
 
     main, generated, installed = write_configs(tmp_path)
 
@@ -172,15 +173,15 @@ def test_check_bird_reports_rejected_configuration(
     )
     by_name = {check.name: check for check in checks}
 
-    assert by_name["Configure check"].status is DoctorStatus.ERROR
-    assert by_name["Configure check"].message == "syntax error"
+    assert by_name["Configuration parse"].status is DoctorStatus.ERROR
+    assert by_name["Configuration parse"].message == "syntax error"
 
 
 def test_check_bird_skips_command_when_main_config_missing(
     tmp_path: Path,
     monkeypatch: Any,
 ) -> None:
-    """Missing main config must prevent birdc invocation."""
+    """Missing main config must prevent bird invocation."""
 
     main = tmp_path / "missing.conf"
     generated = tmp_path / "generated.conf"
@@ -213,4 +214,4 @@ def test_check_bird_skips_command_when_main_config_missing(
 
     assert called is False
     assert by_name["Main configuration"].status is DoctorStatus.ERROR
-    assert by_name["Configure check"].status is DoctorStatus.ERROR
+    assert by_name["Configuration parse"].status is DoctorStatus.ERROR
