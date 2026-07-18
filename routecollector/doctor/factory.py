@@ -14,6 +14,10 @@ from routecollector.doctor.database_checks import (
     check_database,
 )
 from routecollector.doctor.runner import DoctorRunner
+from routecollector.doctor.source_checks import (
+    check_service_configuration,
+    check_source_plugins,
+)
 
 
 DEFAULT_DOCTOR_DIRECTORIES = (
@@ -25,12 +29,14 @@ DEFAULT_DOCTOR_DIRECTORIES = (
 )
 
 DEFAULT_DOCTOR_DATABASE = Path("state/state.db")
+DEFAULT_DOCTOR_SERVICES = Path("config/services")
 
 
 def build_doctor_runner(
     config_path: Path,
     directories: tuple[Path, ...] = DEFAULT_DOCTOR_DIRECTORIES,
     database_path: Path = DEFAULT_DOCTOR_DATABASE,
+    services_dir: Path = DEFAULT_DOCTOR_SERVICES,
 ) -> DoctorRunner:
     """Create the default read-only diagnostic runner."""
 
@@ -44,6 +50,16 @@ def build_doctor_runner(
     )
     runner.register(
         lambda: check_database(database_path)
+    )
+    runner.register(
+        lambda: check_service_configuration(
+            services_dir
+        )
+    )
+    runner.register(
+        lambda: check_source_plugins(
+            services_dir
+        )
     )
 
     return runner
