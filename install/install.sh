@@ -1,35 +1,59 @@
 #!/usr/bin/env bash
+
 set -Eeuo pipefail
 
-PROJECT_NAME="routecollector"
 INSTALL_DIR="${INSTALL_DIR:-/opt/routecollector}"
-REPO_URL="${REPO_URL:-https://github.com/bagamann/routecollector.git}"
-SERVICE_FILE="/etc/systemd/system/routecollector.service"
-BIRD_MAIN_CONFIG="/etc/bird/bird.conf"
+REPO_URL="${REPO_URL:-https://github.com/bagaMann/routecollector.git}"
+ROUTECOLLECTOR_REF="${ROUTECOLLECTOR_REF:-main}"
 RUN_USER="${RUN_USER:-root}"
 
-log() { printf '[routecollector] %s\n' "$*"; }
-fail() { printf '[routecollector] ERROR: %s\n' "$*" >&2; exit 1; }
+SERVICE_NAME="routecollector.service"
+SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}"
+BIRD_MAIN_CONFIG="/etc/bird/bird.conf"
+BIRD_INCLUDE_CONFIG="/etc/bird/routecollector.conf"
+GLOBAL_COMMAND="/usr/local/bin/routecollector"
 
-[[ "${EUID}" -eq 0 ]] || fail "Run this installer as root."
+log() {
+    printf '[routecollector] %s\n' "$*"
+}
 
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y bird2 git sqlite3 python3 python3-pip python3-venv ca-certificates
+fail() {
+    printf '[routecollector] ERROR: %s\n' "$*" >&2
+    exit 1
+}
 
-if [[ -d "${INSTALL_DIR}/.git" ]]; then
-    git -C "${INSTALL_DIR}" fetch --tags origin
-    git -C "${INSTALL_DIR}" pull --ff-only
-else
-    mkdir -p "$(dirname "${INSTALL_DIR}")"
-    git clone "${REPO_URL}" "${INSTALL_DIR}"
-fi
+require_root() {
+    [[ "${EUID}" -eq 0 ]] || fail "Run this installer as root."
+}
 
-python3 -m venv "${INSTALL_DIR}/.venv"
-"${INSTALL_DIR}/.venv/bin/python" -m pip install --upgrade pip
-"${INSTALL_DIR}/.venv/bin/pip" install -e "${INSTALL_DIR}"
+checkout_ref() {
+    local ref="$1"
 
-cat > /usr/local/bin/routecollector <<EOF
+    git -C "${INSTALL_DIR}" fetch --tags --prune origin
+
+    if git -C "${INSTALL_DIR}" show-ref \
+        --verify --quiet "refs/remotes/origin/${ref}"; then
+        git -C "${INSTALL_DIR}" switch -C "${ref}" "origin/${ref}"
+        return
+    fi
+
+    if git -C "${INSTALL_DIR}" show-ref \
+        --verify --quiet "refs/tags/${ref}"; then
+        git -C "${INSTALL_DIR}" checkout --detach "refs/tags/${ref}"
+        return
+    fi
+
+    if git -C "${INSTALL_DIR}" rev-parse \
+        --verify --quiet "${ref}^{commit}" >/dev/null; then
+        git -C "${INSTALL_DIR}" checkout --detach "${ref}"
+        return
+    fi
+
+    fail "Git reference not found: ${ref}"
+}
+
+write_global_command() {
+    cat > "${GLOBAL_COMMAND}" <<EOF
 #!/usr/bin/env bash
 set -e
 
@@ -37,17 +61,14 @@ cd "${INSTALL_DIR}"
 exec "${INSTALL_DIR}/.venv/bin/routecollector" "\$@"
 EOF
 
-chmod 755 /usr/local/bin/routecollector
+    chmod 755 "${GLOBAL_COMMAND}"
+}
 
-mkdir -p "${INSTALL_DIR}/state" "${INSTALL_DIR}/logs" "${INSTALL_DIR}/cache" "${INSTALL_DIR}/bird"
-
-include_line='include "/etc/bird/routecollector.conf";'
-grep -Fqx "${include_line}" "${BIRD_MAIN_CONFIG}" || printf '\n%s\n' "${include_line}" >> "${BIRD_MAIN_CONFIG}"
-
-cat > "${SERVICE_FILE}" <<EOF
+write_systemd_unit() {
+    cat > "${SERVICE_FILE}" <<EOF
 [Unit]
 Description=RouteCollector BGP Route Intelligence Daemon
-Documentation=https://github.com/bagamann/routecollector
+Documentation=https://github.com/bagaMann/routecollector
 Wants=network-online.target
 After=network-online.target bird.service
 Requires=bird.service
@@ -57,11 +78,11 @@ Type=simple
 User=${RUN_USER}
 Group=${RUN_USER}
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=${INSTALL_DIR}/.venv/bin/routecollector daemon \
-    --interval 1800 \
-    --lock-file ${INSTALL_DIR}/state/routecollector.lock \
-    --min-confidence-ipv4 60 \
-    --min-confidence-ipv6 60 \
+ExecStart=${INSTALL_DIR}/.venv/bin/routecollector daemon \\
+    --interval 1800 \\
+    --lock-file ${INSTALL_DIR}/state/routecollector.lock \\
+    --min-confidence-ipv4 60 \\
+    --min-confidence-ipv6 60 \\
     --max-age-days 30
 Restart=on-failure
 RestartSec=15
@@ -73,115 +94,137 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
+}
 
-systemctl daemon-reload
-systemctl enable --now bird
+ensure_bird_include() {
+    local include_line='include "/etc/bird/routecollector.conf";'
 
-cd "${INSTALL_DIR}"
-"${INSTALL_DIR}/.venv/bin/routecollector" init
-"${INSTALL_DIR}/.venv/bin/routecollector" sync
-"${INSTALL_DIR}/.venv/bin/routecollector" run-once     --min-confidence-ipv4 60     --min-confidence-ipv6 60
+    [[ -f "${BIRD_MAIN_CONFIG}" ]] \
+        || fail "BIRD configuration not found: ${BIRD_MAIN_CONFIG}"
 
-systemctl enable --now routecollector.service
+    grep -Fqx "${include_line}" "${BIRD_MAIN_CONFIG}" \
+        || printf '\n%s\n' "${include_line}" >> "${BIRD_MAIN_CONFIG}"
+}
 
-systemctl is-active --quiet bird || fail "BIRD is not active."
-systemctl is-active --quiet routecollector.service || fail "RouteCollector is not active."
+print_summary() {
+    printf '\n'
+    printf '%s\n' '============================================'
+    printf '%s\n' 'RouteCollector installation completed'
+    printf '%s\n' '============================================'
+    printf '\n'
 
-printf '\n'
-printf '%s\n' '============================================'
-printf '%s\n' 'RouteCollector installation completed'
-printf '%s\n' '============================================'
-printf '\n'
+    cd "${INSTALL_DIR}"
 
-cd "${INSTALL_DIR}"
+    "${INSTALL_DIR}/.venv/bin/routecollector" --quiet version
 
-"${INSTALL_DIR}/.venv/bin/routecollector" \
-    --quiet version
+    printf '\n'
+    printf '%s\n' 'Installation status'
+    printf '%s\n' '-------------------'
+    "${INSTALL_DIR}/.venv/bin/routecollector" --quiet status
 
-printf '\n'
-printf '%s\n' 'Installation status'
-printf '%s\n' '-------------------'
+    printf '\n'
+    printf '%s\n' 'Doctor'
+    printf '%s\n' '------'
+    "${INSTALL_DIR}/.venv/bin/routecollector" doctor
 
-"${INSTALL_DIR}/.venv/bin/routecollector" \
-    --quiet status
+    printf '\n'
+    printf '%s\n' 'System services'
+    printf '%s\n' '---------------'
+    printf 'BIRD               : %s\n' "$(systemctl is-active bird)"
+    printf 'RouteCollector     : %s\n' \
+        "$(systemctl is-active "${SERVICE_NAME}")"
 
-printf '\n'
-printf '%s\n' 'Services'
-printf '%s\n' '--------'
+    printf '\n'
+    printf '%s\n' 'Paths'
+    printf '%s\n' '-----'
+    printf 'Installation       : %s\n' "${INSTALL_DIR}"
+    printf 'Configuration      : %s\n' "${INSTALL_DIR}/config"
+    printf 'Database           : %s\n' "${INSTALL_DIR}/state/state.db"
+    printf 'BIRD configuration : %s\n' "${BIRD_INCLUDE_CONFIG}"
+    printf 'Global command     : %s\n' "${GLOBAL_COMMAND}"
 
-"${INSTALL_DIR}/.venv/bin/python" - <<'PY'
-import sqlite3
-from pathlib import Path
+    printf '\n'
+    printf '%s\n' 'Useful commands'
+    printf '%s\n' '---------------'
+    printf 'routecollector status\n'
+    printf 'routecollector doctor\n'
+    printf 'routecollector run-once --dry-run\n'
+    printf 'routecollector history --limit 5\n'
+    printf 'systemctl status routecollector.service\n'
+    printf 'journalctl -u routecollector.service -f\n'
+    printf 'birdc show protocols\n'
 
-database_path = Path("state/state.db")
+    printf '\n'
+    printf 'Installed Git ref  : %s\n' "${ROUTECOLLECTOR_REF}"
+    printf '%s\n' '============================================'
+    printf '%s\n' 'RouteCollector is ready for operation.'
+    printf '%s\n' '============================================'
+}
 
-with sqlite3.connect(database_path) as connection:
-    service_count = connection.execute(
-        "SELECT COUNT(*) FROM services WHERE enabled = 1"
-    ).fetchone()[0]
+main() {
+    require_root
 
-    service_names = [
-        row[0]
-        for row in connection.execute(
-            """
-            SELECT name
-            FROM services
-            WHERE enabled = 1
-            ORDER BY name
-            """
-        ).fetchall()
-    ]
+    export DEBIAN_FRONTEND=noninteractive
 
-    domain_count = connection.execute(
-        "SELECT COUNT(*) FROM domains WHERE active = 1"
-    ).fetchone()[0]
+    log "Installing system packages."
+    apt-get update
+    apt-get install -y \
+        bird2 \
+        git \
+        sqlite3 \
+        python3 \
+        python3-pip \
+        python3-venv \
+        ca-certificates
 
-    observation_count = connection.execute(
-        "SELECT COUNT(*) FROM observations"
-    ).fetchone()[0]
+    if [[ -d "${INSTALL_DIR}/.git" ]]; then
+        [[ -z "$(git -C "${INSTALL_DIR}" status --porcelain)" ]] \
+            || fail "Existing checkout has uncommitted changes."
+        checkout_ref "${ROUTECOLLECTOR_REF}"
+    else
+        mkdir -p "$(dirname "${INSTALL_DIR}")"
+        git clone "${REPO_URL}" "${INSTALL_DIR}"
+        checkout_ref "${ROUTECOLLECTOR_REF}"
+    fi
 
-    route_count = connection.execute(
-        "SELECT COUNT(*) FROM route_stats"
-    ).fetchone()[0]
+    log "Creating Python virtual environment."
+    python3 -m venv "${INSTALL_DIR}/.venv"
+    "${INSTALL_DIR}/.venv/bin/python" -m pip install --upgrade pip
+    "${INSTALL_DIR}/.venv/bin/python" -m pip install -e "${INSTALL_DIR}"
 
-print(f"Enabled services   : {service_count}")
-print(f"Service names      : " + ", ".join(service_names))
-print(f"Active domains     : {domain_count}")
-print(f"DNS observations   : {observation_count}")
-print(f"Route statistics   : {route_count}")
-PY
+    write_global_command
 
-printf '\n'
-printf '%s\n' 'System services'
-printf '%s\n' '---------------'
-printf 'BIRD               : %s\n' \
-    "$(systemctl is-active bird)"
-printf 'RouteCollector     : %s\n' \
-    "$(systemctl is-active routecollector.service)"
+    mkdir -p \
+        "${INSTALL_DIR}/state" \
+        "${INSTALL_DIR}/state/plans" \
+        "${INSTALL_DIR}/state/backups" \
+        "${INSTALL_DIR}/logs" \
+        "${INSTALL_DIR}/cache" \
+        "${INSTALL_DIR}/bird"
 
-printf '\n'
-printf 'Paths\n'
-printf '%s\n' '-----'
-printf 'Installation       : %s\n' "${INSTALL_DIR}"
-printf 'Configuration      : %s\n' \
-    "${INSTALL_DIR}/config"
-printf 'Database           : %s\n' \
-    "${INSTALL_DIR}/state/state.db"
-printf 'BIRD configuration : %s\n' \
-    "/etc/bird/routecollector.conf"
-printf 'Global command     : %s\n' \
-    "/usr/local/bin/routecollector"
+    ensure_bird_include
+    write_systemd_unit
 
-printf '\n'
-printf '%s\n' 'Useful commands'
-printf '%s\n' '---------------'
-printf 'routecollector status\n'
-printf 'routecollector plan\n'
-printf 'systemctl status routecollector.service\n'
-printf 'journalctl -u routecollector.service -f\n'
-printf 'birdc show protocols\n'
+    systemctl daemon-reload
+    systemctl enable --now bird
 
-printf '\n'
-printf '%s\n' '============================================'
-printf '%s\n' 'RouteCollector is ready for operation.'
-printf '%s\n' '============================================'
+    cd "${INSTALL_DIR}"
+
+    "${INSTALL_DIR}/.venv/bin/routecollector" init
+    "${INSTALL_DIR}/.venv/bin/routecollector" sync
+    "${INSTALL_DIR}/.venv/bin/routecollector" run-once \
+        --min-confidence-ipv4 60 \
+        --min-confidence-ipv6 60
+
+    systemctl enable --now "${SERVICE_NAME}"
+
+    systemctl is-active --quiet bird \
+        || fail "BIRD is not active."
+
+    systemctl is-active --quiet "${SERVICE_NAME}" \
+        || fail "RouteCollector is not active."
+
+    print_summary
+}
+
+main "$@"
