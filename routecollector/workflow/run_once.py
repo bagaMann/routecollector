@@ -24,7 +24,10 @@ from routecollector.history.cycle_history import (
 from routecollector.history.plan_snapshot import PlanSnapshotStore
 from routecollector.planner.planner import PlannedRoute, RoutePlanner
 from routecollector.resolver.resolver import DnsResolver
-from routecollector.sources.service_source_sync import ServiceSourceSync
+from routecollector.sources.service_source_sync import (
+    ServiceSourceSync,
+    SourceSyncResult,
+)
 
 
 class RunOnceError(RuntimeError):
@@ -35,6 +38,7 @@ class RunOnceError(RuntimeError):
 class RunOnceResult:
     """Result of one complete RouteCollector cycle."""
 
+    sync_result: SourceSyncResult
     services_synced: int
     domains_synced: int
     domains_resolved: int
@@ -135,6 +139,7 @@ class RunOnceWorkflow:
             return self._complete_dry_run(
                 routes=routes,
                 started_at=started_at,
+                sync_result=sync_result,
                 services_synced=services_synced,
                 domains_synced=domains_synced,
                 domains_resolved=domains_resolved,
@@ -233,6 +238,7 @@ class RunOnceWorkflow:
         ).add(history_entry)
 
         return RunOnceResult(
+            sync_result=sync_result,
             services_synced=services_synced,
             domains_synced=domains_synced,
             domains_resolved=domains_resolved,
@@ -257,6 +263,7 @@ class RunOnceWorkflow:
         self,
         routes: Iterable[PlannedRoute],
         started_at: datetime,
+        sync_result: SourceSyncResult,
         services_synced: int,
         domains_synced: int,
         domains_resolved: int,
@@ -281,6 +288,7 @@ class RunOnceWorkflow:
         )
 
         return RunOnceResult(
+            sync_result=sync_result,
             services_synced=services_synced,
             domains_synced=domains_synced,
             domains_resolved=domains_resolved,

@@ -782,7 +782,7 @@ def command_run_once(
     enable_ipv6: bool,
     dry_run: bool,
 ) -> int:
-    """Execute one complete update cycle."""
+    """Execute one complete update cycle and print a structured report."""
 
     app = get_app(config_path)
 
@@ -797,59 +797,109 @@ def command_run_once(
         dry_run=dry_run,
     )
 
-    if result.dry_run:
-        print("RouteCollector dry run completed")
-    else:
-        print("RouteCollector cycle completed")
-    print()
-    print(f"Services synced:     {result.services_synced}")
-    print(f"Domains synced:      {result.domains_synced}")
-    print(f"Domains resolved:    {result.domains_resolved}")
-    print(f"Observations stored: {result.observations_stored}")
-    print(f"Route statistics:    {result.route_stats_built}")
-    print(f"Planned routes:      {result.planned_routes}")
-    print(f"Routes added:        {result.routes_added}")
-    print(f"Routes removed:      {result.routes_removed}")
-    print(f"Duration:            {result.duration_seconds:.1f}s")
-    print(f"Generated config:    {result.generated_config}")
     print(
-        "Generated changed:   "
+        "RouteCollector dry run completed"
+        if result.dry_run
+        else "RouteCollector cycle completed"
+    )
+    print()
+
+    print("Synchronization")
+    print("---------------")
+    print(f"Configured services   : {result.sync_result.service_count}")
+    print(f"Disabled services     : {result.sync_result.disabled_service_count}")
+    print(f"Source plugins        : {result.sync_result.source_count}")
+    print(f"Merged domains        : {result.sync_result.domain_count}")
+    print(f"Rows deactivated      : {result.sync_result.deactivated_count}")
+
+    for service in result.sync_result.services:
+        state = "enabled" if service.enabled else "disabled"
+        print()
+        print(f"  {service.service_name} [{state}]")
+
+        source_width = max(
+            [len(source.source_name) for source in service.sources]
+            + [len("merged")]
+        )
+
+        for source in service.sources:
+            print(
+                f"    {source.source_name:<{source_width}}  "
+                f"{source.domain_count:>6} domains"
+            )
+
+        print(
+            f"    {'merged':<{source_width}}  "
+            f"{service.domain_count:>6} domains"
+        )
+
+    print()
+    print("DNS")
+    print("---")
+    print(f"Resolved domains      : {result.domains_resolved}")
+    print(f"Observations stored   : {result.observations_stored}")
+
+    print()
+    print("Routing")
+    print("-------")
+    print(f"Route statistics      : {result.route_stats_built}")
+    print(f"Planned routes        : {result.planned_routes}")
+    print(f"Routes added          : {result.routes_added}")
+    print(f"Routes removed        : {result.routes_removed}")
+
+    print()
+    print("Publication")
+    print("-----------")
+    print(f"Generated config      : {result.generated_config}")
+    print(
+        "Generated changed     : "
         + ("yes" if result.generated_changed else "no")
     )
+
     if result.dry_run:
-        print("Installed config:    not modified")
-        print("Installed changed:   no")
+        print("Installed config      : not modified")
+        print("Installed changed     : no")
         print()
-        print("BIRD configuration was not installed.")
-        print("BIRD was not reloaded.")
-        print(
-            "Snapshot and cycle history were not modified."
-        )
+        print("BIRD")
+        print("----")
+        print("Configuration check   : skipped")
+        print("Reload                : skipped")
+        print("Rollback              : not required")
+        print()
+        print("History")
+        print("-------")
+        print("Snapshot              : not stored")
+        print("Cycle history         : not stored")
+        print()
+        print(f"Duration              : {result.duration_seconds:.1f}s")
         return 0
 
-    print(f"Installed config:    {result.installed_config}")
+    print(f"Installed config      : {result.installed_config}")
     print(
-        "Installed changed:   "
+        "Installed changed     : "
         + ("yes" if result.installed_changed else "no")
     )
     print()
-    print(result.bird_check_output)
-
-    if result.bird_reloaded:
-        print()
-        print(
-            "BIRD configuration was reloaded "
-            "automatically."
-        )
-    else:
-        print()
-        print(
-            "No BIRD route changes detected; "
-            "reload is not required."
-        )
+    print("BIRD")
+    print("----")
+    print("Configuration check   : passed")
+    print(
+        "Reload                : "
+        + ("completed" if result.bird_reloaded else "not required")
+    )
+    print(
+        "Rollback              : "
+        + ("performed" if result.rollback_performed else "not required")
+    )
+    print()
+    print("History")
+    print("-------")
+    print("Snapshot              : stored")
+    print("Cycle history         : stored")
+    print()
+    print(f"Duration              : {result.duration_seconds:.1f}s")
 
     return 0
-
 
 def command_daemon(
     config_path: Path,

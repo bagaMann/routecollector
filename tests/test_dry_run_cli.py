@@ -7,6 +7,44 @@ from types import SimpleNamespace
 from typing import Any
 
 import routecollector.cli as cli_module
+from routecollector.sources.service_source_sync import (
+    ServiceSourceSyncResult,
+    SourceExecutionResult,
+    SourceSyncResult,
+)
+
+
+def make_sync_result() -> SourceSyncResult:
+    """Return representative source synchronization statistics."""
+
+    return SourceSyncResult(
+        service_count=3,
+        source_count=6,
+        domain_count=232,
+        deactivated_count=258,
+        disabled_service_count=0,
+        services=(
+            ServiceSourceSyncResult(
+                service_name="youtube",
+                enabled=True,
+                source_count=2,
+                domain_count=180,
+                deactivated_count=188,
+                sources=(
+                    SourceExecutionResult(
+                        source_name="manual",
+                        domain_count=11,
+                        metadata={},
+                    ),
+                    SourceExecutionResult(
+                        source_name="domain-list-community",
+                        domain_count=177,
+                        metadata={},
+                    ),
+                ),
+            ),
+        ),
+    )
 
 
 def test_run_once_parser_accepts_dry_run() -> None:
@@ -34,10 +72,12 @@ def test_command_run_once_prints_dry_run_summary(
         ) -> SimpleNamespace:
             assert service_name is None
             assert dry_run is True
+
             return SimpleNamespace(
+                sync_result=make_sync_result(),
                 services_synced=3,
                 domains_synced=232,
-                domains_resolved=233,
+                domains_resolved=232,
                 observations_stored=3300,
                 route_stats_built=87,
                 planned_routes=47,
@@ -82,7 +122,14 @@ def test_command_run_once_prints_dry_run_summary(
 
     assert result == 0
     assert "RouteCollector dry run completed" in output
-    assert "Routes added:        2" in output
-    assert "Routes removed:      1" in output
-    assert "BIRD configuration was not installed." in output
-    assert "Snapshot and cycle history were not modified." in output
+    assert "Synchronization" in output
+    assert "Configured services   : 3" in output
+    assert "Source plugins        : 6" in output
+    assert "Merged domains        : 232" in output
+    assert "Routes added          : 2" in output
+    assert "Routes removed        : 1" in output
+    assert "Installed config      : not modified" in output
+    assert "Configuration check   : skipped" in output
+    assert "Reload                : skipped" in output
+    assert "Snapshot              : not stored" in output
+    assert "Cycle history         : not stored" in output
