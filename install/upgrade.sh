@@ -188,10 +188,6 @@ main() {
         "${INSTALL_DIR}/.venv/bin/pytest" -q
     fi
 
-    "${INSTALL_DIR}/.venv/bin/routecollector" run-once --dry-run \
-        --min-confidence-ipv4 60 \
-        --min-confidence-ipv6 60
-
     "${INSTALL_DIR}/.venv/bin/routecollector" run-once \
         --min-confidence-ipv4 60 \
         --min-confidence-ipv6 60
