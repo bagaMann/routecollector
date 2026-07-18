@@ -11,8 +11,13 @@ from typing import Any
 import pytest
 
 import routecollector.workflow.run_once as workflow_module
+from routecollector.core.database import Database
 from routecollector.exporter.birdctl import BirdControlError
-from routecollector.workflow.run_once import RunOnceError, RunOnceWorkflow
+from routecollector.history.cycle_history import CycleHistoryStore
+from routecollector.workflow.run_once import (
+    RunOnceError,
+    RunOnceWorkflow,
+)
 
 
 class FakeRepository:
@@ -39,8 +44,9 @@ class FakeServiceSourceSync:
             services=(),
         )
 
+
 class FakeDnsResolver:
-    """Resolver stub for workflow tests."""
+    """Fake DNS resolver."""
 
     def __init__(
         self,
@@ -58,6 +64,7 @@ class FakeDnsResolver:
         assert service_name == "youtube"
         return 189, 2800
 
+
 class FakeRoutePlanner:
     """Fake route planner."""
 
@@ -72,7 +79,12 @@ class FakeRoutePlanner:
                 prefix="192.0.2.0/24",
                 family=4,
                 source_ips=5,
-                confidence=20,
+                unique_domains=4,
+                unique_resolvers=2,
+                source_count=2,
+                source_trust=100,
+                confidence=80,
+                publish_score=95,
             )
         ]
 
@@ -99,15 +111,35 @@ def patch_common_components(
     )
 
 
-def build_workflow(tmp_path: Path) -> RunOnceWorkflow:
+def build_workflow(
+    tmp_path: Path,
+) -> tuple[RunOnceWorkflow, Database]:
     """Create a workflow with temporary paths."""
 
-    return RunOnceWorkflow(
+    database = Database(tmp_path / "state.db")
+    database.initialize()
+
+    workflow = RunOnceWorkflow(
         repository=FakeRepository(),  # type: ignore[arg-type]
+        database=database,
         services_dir=tmp_path / "services",
         generated_config=tmp_path / "generated.conf",
         installed_config=tmp_path / "installed.conf",
         main_bird_config=tmp_path / "bird.conf",
+        snapshot_directory=tmp_path / "plans",
+        dry_run_config=tmp_path / "dry-run" / "routecollector.conf",
+    )
+
+    return workflow, database
+
+
+def snapshot_paths(
+    tmp_path: Path,
+) -> list[Path]:
+    """Return all stored test snapshots."""
+
+    return list(
+        (tmp_path / "plans").glob("*.json")
     )
 
 
@@ -123,8 +155,12 @@ def test_run_once_skips_reload_when_config_is_unchanged(
         def __init__(self, output_file: Path) -> None:
             self._output_file = output_file
 
-        def export(self, routes: list[Any]) -> SimpleNamespace:
+        def export(
+            self,
+            routes: list[Any],
+        ) -> SimpleNamespace:
             assert len(routes) == 1
+
             return SimpleNamespace(
                 path=self._output_file,
                 changed=False,
@@ -141,6 +177,12 @@ def test_run_once_skips_reload_when_config_is_unchanged(
                 backup_path=None,
             )
 
+        def remove_backup(
+            self,
+            _: Path | None,
+        ) -> None:
+            pass
+
     class FakeBirdControl:
         configure_calls = 0
 
@@ -151,7 +193,11 @@ def test_run_once_skips_reload_when_config_is_unchanged(
             type(self).configure_calls += 1
             return "Reconfigured"
 
-    monkeypatch.setattr(workflow_module, "BirdExporter", FakeExporter)
+    monkeypatch.setattr(
+        workflow_module,
+        "BirdExporter",
+        FakeExporter,
+    )
     monkeypatch.setattr(
         workflow_module,
         "BirdConfigInstaller",
@@ -163,14 +209,27 @@ def test_run_once_skips_reload_when_config_is_unchanged(
         FakeBirdControl,
     )
 
-    result = build_workflow(tmp_path).run("youtube")
+    workflow, database = build_workflow(tmp_path)
+    result = workflow.run("youtube")
 
     assert result.generated_changed is False
     assert result.installed_changed is False
     assert result.bird_reloaded is False
     assert result.rollback_performed is False
     assert result.bird_reload_output is None
+    assert result.routes_added == 0
+    assert result.routes_removed == 0
+    assert result.duration_seconds >= 0
     assert FakeBirdControl.configure_calls == 0
+    assert len(snapshot_paths(tmp_path)) == 1
+
+    history = CycleHistoryStore(database).latest()
+    assert history is not None
+    assert history.service_name == "youtube"
+    assert history.planned_routes == 1
+    assert history.routes_added == 0
+    assert history.routes_removed == 0
+    assert history.bird_reloaded is False
 
 
 def test_run_once_reloads_bird_when_config_changed(
@@ -187,8 +246,12 @@ def test_run_once_reloads_bird_when_config_changed(
         def __init__(self, output_file: Path) -> None:
             self._output_file = output_file
 
-        def export(self, routes: list[Any]) -> SimpleNamespace:
+        def export(
+            self,
+            routes: list[Any],
+        ) -> SimpleNamespace:
             assert len(routes) == 1
+
             return SimpleNamespace(
                 path=self._output_file,
                 changed=True,
@@ -208,11 +271,17 @@ def test_run_once_reloads_bird_when_config_changed(
                 backup_path=backup_path,
             )
 
-        def remove_backup(self, path: Path | None) -> None:
+        def remove_backup(
+            self,
+            path: Path | None,
+        ) -> None:
             assert path == backup_path
             type(self).backup_removed = True
 
-        def rollback(self, _: Path | None) -> None:
+        def rollback(
+            self,
+            _: Path | None,
+        ) -> None:
             type(self).rollback_called = True
 
     class FakeBirdControl:
@@ -222,7 +291,11 @@ def test_run_once_reloads_bird_when_config_changed(
         def configure(self) -> str:
             return "Reconfigured"
 
-    monkeypatch.setattr(workflow_module, "BirdExporter", FakeExporter)
+    monkeypatch.setattr(
+        workflow_module,
+        "BirdExporter",
+        FakeExporter,
+    )
     monkeypatch.setattr(
         workflow_module,
         "BirdConfigInstaller",
@@ -234,7 +307,8 @@ def test_run_once_reloads_bird_when_config_changed(
         FakeBirdControl,
     )
 
-    result = build_workflow(tmp_path).run("youtube")
+    workflow, database = build_workflow(tmp_path)
+    result = workflow.run("youtube")
 
     assert result.generated_changed is True
     assert result.installed_changed is True
@@ -243,13 +317,20 @@ def test_run_once_reloads_bird_when_config_changed(
     assert result.bird_reload_output == "Reconfigured"
     assert FakeInstaller.backup_removed is True
     assert FakeInstaller.rollback_called is False
+    assert len(snapshot_paths(tmp_path)) == 1
+
+    history = CycleHistoryStore(database).latest()
+    assert history is not None
+    assert history.bird_reloaded is True
+    assert history.generated_changed is True
+    assert history.installed_changed is True
 
 
 def test_run_once_rolls_back_when_bird_reload_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Failed BIRD reload must restore and apply the previous config."""
+    """Failed BIRD reload must restore previous config."""
 
     patch_common_components(monkeypatch)
 
@@ -259,7 +340,10 @@ def test_run_once_rolls_back_when_bird_reload_fails(
         def __init__(self, output_file: Path) -> None:
             self._output_file = output_file
 
-        def export(self, routes: list[Any]) -> SimpleNamespace:
+        def export(
+            self,
+            routes: list[Any],
+        ) -> SimpleNamespace:
             return SimpleNamespace(
                 path=self._output_file,
                 changed=True,
@@ -279,11 +363,17 @@ def test_run_once_rolls_back_when_bird_reload_fails(
                 backup_path=backup_path,
             )
 
-        def rollback(self, path: Path | None) -> None:
+        def rollback(
+            self,
+            path: Path | None,
+        ) -> None:
             assert path == backup_path
             type(self).rollback_called = True
 
-        def remove_backup(self, _: Path | None) -> None:
+        def remove_backup(
+            self,
+            _: Path | None,
+        ) -> None:
             type(self).backup_removed = True
 
     class FakeBirdControl:
@@ -302,7 +392,11 @@ def test_run_once_rolls_back_when_bird_reload_fails(
 
             return "Rollback configuration applied"
 
-    monkeypatch.setattr(workflow_module, "BirdExporter", FakeExporter)
+    monkeypatch.setattr(
+        workflow_module,
+        "BirdExporter",
+        FakeExporter,
+    )
     monkeypatch.setattr(
         workflow_module,
         "BirdConfigInstaller",
@@ -314,23 +408,27 @@ def test_run_once_rolls_back_when_bird_reload_fails(
         FakeBirdControl,
     )
 
+    workflow, database = build_workflow(tmp_path)
+
     with pytest.raises(
         RunOnceError,
         match="rollback completed",
     ):
-        build_workflow(tmp_path).run("youtube")
+        workflow.run("youtube")
 
     assert FakeInstaller.rollback_called is True
     assert FakeInstaller.backup_removed is False
     assert FakeBirdControl.configure_calls == 2
     assert FakeBirdControl.check_calls == 2
+    assert snapshot_paths(tmp_path) == []
+    assert CycleHistoryStore(database).count() == 0
 
 
 def test_run_once_rejects_empty_route_plan(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An empty plan must never replace the active BIRD config."""
+    """An empty plan must never replace active BIRD config."""
 
     patch_common_components(monkeypatch)
 
@@ -347,8 +445,91 @@ def test_run_once_rejects_empty_route_plan(
         EmptyRoutePlanner,
     )
 
+    workflow, database = build_workflow(tmp_path)
+
     with pytest.raises(
         RunOnceError,
         match="Route plan is empty",
     ):
-        build_workflow(tmp_path).run("youtube")
+        workflow.run("youtube")
+
+    assert snapshot_paths(tmp_path) == []
+    assert CycleHistoryStore(database).count() == 0
+
+
+def test_run_once_dry_run_does_not_publish_or_store_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dry run must not install BIRD config or persist history."""
+
+    patch_common_components(monkeypatch)
+
+    class FakeExporter:
+        def __init__(self, output_file: Path) -> None:
+            self._output_file = output_file
+
+        def export(
+            self,
+            routes: list[Any],
+        ) -> SimpleNamespace:
+            assert len(routes) == 1
+            self._output_file.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            self._output_file.write_text(
+                "preview",
+                encoding="utf-8",
+            )
+            return SimpleNamespace(
+                path=self._output_file,
+                changed=True,
+            )
+
+    class ForbiddenInstaller:
+        def __init__(self, **_: Any) -> None:
+            raise AssertionError(
+                "Dry run must not construct BirdConfigInstaller"
+            )
+
+    class ForbiddenBirdControl:
+        def __init__(self) -> None:
+            raise AssertionError(
+                "Dry run must not construct BirdControl"
+            )
+
+    monkeypatch.setattr(
+        workflow_module,
+        "BirdExporter",
+        FakeExporter,
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "BirdConfigInstaller",
+        ForbiddenInstaller,
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "BirdControl",
+        ForbiddenBirdControl,
+    )
+
+    workflow, database = build_workflow(tmp_path)
+    result = workflow.run(
+        "youtube",
+        dry_run=True,
+    )
+
+    assert result.dry_run is True
+    assert result.generated_config == (
+        tmp_path / "dry-run" / "routecollector.conf"
+    )
+    assert result.generated_changed is True
+    assert result.installed_config is None
+    assert result.installed_changed is False
+    assert result.bird_reloaded is False
+    assert result.routes_added == 0
+    assert result.routes_removed == 0
+    assert snapshot_paths(tmp_path) == []
+    assert CycleHistoryStore(database).count() == 0

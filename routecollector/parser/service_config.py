@@ -10,11 +10,13 @@ from typing import Any
 
 import yaml
 
-from routecollector.core.repository import Repository
-from routecollector.sources.domain_list_community import (
-    DomainListCommunityClient,
-    DomainListCommunityParser,
-)
+
+@dataclass(slots=True, frozen=True)
+class SourceConfig:
+    """Normalized configuration for one source plugin."""
+
+    type: str
+    options: dict[str, object]
 
 
 @dataclass(slots=True, frozen=True)
@@ -24,6 +26,9 @@ class ServiceConfig:
     name: str
     enabled: bool
     description: str | None
+    source_configs: tuple[SourceConfig, ...]
+
+    # Compatibility fields retained for existing callers.
     domains: list[str]
     sources: list[str]
     domain_list_community_lists: list[str]
@@ -47,121 +52,246 @@ class ServiceConfigLoader:
 
         configs: list[ServiceConfig] = []
 
-        for filename in sorted(self._services_dir.glob("*.yaml")):
+        for filename in sorted(
+            self._services_dir.glob("*.yaml")
+        ):
             configs.append(self._load_file(filename))
 
         return configs
 
     def _load_file(self, filename: Path) -> ServiceConfig:
-        with filename.open("r", encoding="utf-8") as file:
+        """Load and normalize one service YAML file."""
+
+        with filename.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
             data: dict[str, Any] | None = yaml.safe_load(file)
 
         if not data:
-            raise ServiceConfigError(f"Empty service config: {filename}")
+            raise ServiceConfigError(
+                f"Empty service config: {filename}"
+            )
 
         name = data.get("name")
-        if not isinstance(name, str) or not name:
-            raise ServiceConfigError(f"Missing service name: {filename}")
 
+        if not isinstance(name, str) or not name.strip():
+            raise ServiceConfigError(
+                f"Missing service name: {filename}"
+            )
+
+        name = name.strip()
         enabled = bool(data.get("enabled", True))
         description = data.get("description")
 
-        domains_raw = data.get("domains", [])
-        if not isinstance(domains_raw, list):
-            raise ServiceConfigError(f"'domains' must be list: {filename}")
+        domains = self._parse_string_list(
+            data.get("domains", []),
+            field_name="domains",
+            filename=filename,
+        )
 
-        sources_raw = data.get("sources", ["manual"])
-        if not isinstance(sources_raw, list):
-            raise ServiceConfigError(f"'sources' must be list: {filename}")
+        dlc_raw = data.get(
+            "domain_list_community",
+            {},
+        )
 
-        dlc_raw = data.get("domain_list_community", {})
         if dlc_raw is None:
             dlc_raw = {}
 
         if not isinstance(dlc_raw, dict):
             raise ServiceConfigError(
-                f"'domain_list_community' must be mapping: {filename}"
+                "'domain_list_community' must be mapping: "
+                f"{filename}"
             )
 
-        dlc_lists_raw = dlc_raw.get("lists", [])
-        if not isinstance(dlc_lists_raw, list):
-            raise ServiceConfigError(
-                f"'domain_list_community.lists' must be list: {filename}"
-            )
+        dlc_lists = self._parse_string_list(
+            dlc_raw.get("lists", []),
+            field_name="domain_list_community.lists",
+            filename=filename,
+        )
 
-        domains = [str(domain).strip() for domain in domains_raw if str(domain).strip()]
-        sources = [str(source).strip() for source in sources_raw if str(source).strip()]
-        dlc_lists = [
-            str(list_name).strip()
-            for list_name in dlc_lists_raw
-            if str(list_name).strip()
+        source_configs = self._parse_sources(
+            raw_sources=data.get("sources", ["manual"]),
+            service_name=name,
+            legacy_domains=domains,
+            legacy_dlc_lists=dlc_lists,
+            filename=filename,
+        )
+
+        source_names = [
+            source.type
+            for source in source_configs
         ]
 
         return ServiceConfig(
             name=name,
             enabled=enabled,
-            description=description if isinstance(description, str) else None,
+            description=(
+                description
+                if isinstance(description, str)
+                else None
+            ),
+            source_configs=source_configs,
             domains=domains,
-            sources=sources,
+            sources=source_names,
             domain_list_community_lists=dlc_lists,
         )
 
-
-class ServiceConfigSync:
-    """Synchronize service configs into repository."""
-
-    def __init__(
+    def _parse_sources(
         self,
-        repository: Repository,
-        services_dir: Path,
-        cache_dir: Path = Path("cache/domain-list-community"),
-    ) -> None:
-        self._repository = repository
-        self._loader = ServiceConfigLoader(services_dir)
-        self._dlc_client = DomainListCommunityClient(cache_dir)
-        self._dlc_parser = DomainListCommunityParser()
+        *,
+        raw_sources: object,
+        service_name: str,
+        legacy_domains: list[str],
+        legacy_dlc_lists: list[str],
+        filename: Path,
+    ) -> tuple[SourceConfig, ...]:
+        """Parse legacy strings and declarative source mappings."""
 
-    def sync(self) -> tuple[int, int]:
-        """Sync service configs.
-
-        Returns:
-            tuple[int, int]: Number of synced services and domains.
-        """
-
-        service_count = 0
-        domain_count = 0
-
-        for service in self._loader.load_all():
-            service_id = self._repository.upsert_service(
-                name=service.name,
-                description=service.description,
-                enabled=service.enabled,
+        if not isinstance(raw_sources, list):
+            raise ServiceConfigError(
+                f"'sources' must be list: {filename}"
             )
-            service_count += 1
 
-            for domain in service.domains:
-                self._repository.upsert_domain(
-                    service_id=service_id,
-                    domain=domain,
-                    source="manual",
-                    active=True,
+        parsed: list[SourceConfig] = []
+        seen: set[str] = set()
+
+        for index, raw_source in enumerate(raw_sources):
+            if isinstance(raw_source, str):
+                source_type = raw_source.strip().lower()
+
+                if not source_type:
+                    continue
+
+                options = self._legacy_source_options(
+                    source_type=source_type,
+                    service_name=service_name,
+                    domains=legacy_domains,
+                    dlc_lists=legacy_dlc_lists,
                 )
-                domain_count += 1
 
-            for list_name in service.domain_list_community_lists:
-                cached_file = self._dlc_client.fetch(list_name)
-                entries = self._dlc_parser.parse_file(
-                    cached_file,
-                    source_name=f"domain-list-community:{list_name}",
-                )
+            elif isinstance(raw_source, dict):
+                source_type_raw = raw_source.get("type")
 
-                for entry in entries:
-                    self._repository.upsert_domain(
-                        service_id=service_id,
-                        domain=entry.domain,
-                        source=entry.source,
-                        active=True,
+                if (
+                    not isinstance(source_type_raw, str)
+                    or not source_type_raw.strip()
+                ):
+                    raise ServiceConfigError(
+                        "Source mapping requires non-empty "
+                        f"'type' at index {index}: {filename}"
                     )
-                    domain_count += 1
 
-        return service_count, domain_count
+                source_type = (
+                    source_type_raw.strip().lower()
+                )
+
+                options_raw = raw_source.get("options")
+
+                if options_raw is None:
+                    options = {
+                        str(key): value
+                        for key, value in raw_source.items()
+                        if key != "type"
+                    }
+                elif isinstance(options_raw, dict):
+                    extra_keys = {
+                        key
+                        for key in raw_source
+                        if key not in {"type", "options"}
+                    }
+
+                    if extra_keys:
+                        raise ServiceConfigError(
+                            "Source mapping cannot mix 'options' "
+                            "with direct option keys at index "
+                            f"{index}: {filename}"
+                        )
+
+                    options = {
+                        str(key): value
+                        for key, value in options_raw.items()
+                    }
+                else:
+                    raise ServiceConfigError(
+                        "Source 'options' must be mapping at "
+                        f"index {index}: {filename}"
+                    )
+
+            else:
+                raise ServiceConfigError(
+                    "Each source must be a string or mapping "
+                    f"at index {index}: {filename}"
+                )
+
+            if source_type in seen:
+                raise ServiceConfigError(
+                    "Duplicate source type "
+                    f"'{source_type}': {filename}"
+                )
+
+            seen.add(source_type)
+            parsed.append(
+                SourceConfig(
+                    type=source_type,
+                    options=options,
+                )
+            )
+
+        return tuple(parsed)
+
+    @staticmethod
+    def _legacy_source_options(
+        *,
+        source_type: str,
+        service_name: str,
+        domains: list[str],
+        dlc_lists: list[str],
+    ) -> dict[str, object]:
+        """Translate the old YAML layout into plugin options."""
+
+        if source_type == "manual":
+            return {
+                "domains": list(domains),
+            }
+
+        if source_type == "domain-list-community":
+            return {
+                "list": (
+                    dlc_lists[0]
+                    if dlc_lists
+                    else service_name
+                ),
+            }
+
+        return {}
+
+    @staticmethod
+    def _parse_string_list(
+        raw_value: object,
+        *,
+        field_name: str,
+        filename: Path,
+    ) -> list[str]:
+        """Validate and normalize a list of strings."""
+
+        if not isinstance(raw_value, list):
+            raise ServiceConfigError(
+                f"'{field_name}' must be list: {filename}"
+            )
+
+        values: list[str] = []
+
+        for item in raw_value:
+            if not isinstance(item, str):
+                raise ServiceConfigError(
+                    f"'{field_name}' must contain only "
+                    f"strings: {filename}"
+                )
+
+            value = item.strip()
+
+            if value:
+                values.append(value)
+
+        return values
