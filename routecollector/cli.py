@@ -11,6 +11,7 @@ from time import monotonic
 from typing import Sequence
 
 from routecollector import __version__
+from routecollector.doctor import build_doctor_runner
 from routecollector.core.application import Application
 from routecollector.core.version import get_version
 from routecollector.exporter.bird import BirdExporter
@@ -101,6 +102,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser(
         "status",
         help="Show application status",
+    )
+    subparsers.add_parser(
+        "doctor",
+        help="Run read-only system diagnostics",
     )
     subparsers.add_parser(
         "init",
@@ -313,6 +318,48 @@ def command_status(config_path: Path) -> int:
         print(f"{name:<16} {status}")
 
     return 0
+
+
+def command_doctor(config_path: Path) -> int:
+    """Run read-only diagnostics and print a grouped report."""
+
+    result = build_doctor_runner(config_path).run()
+
+    print("RouteCollector doctor")
+    print("=====================")
+
+    for category, checks in result.by_category():
+        print()
+        print(category)
+        print("-" * len(category))
+
+        name_width = max(
+            len(check.name)
+            for check in checks
+        )
+
+        for check in checks:
+            message = (
+                f" — {check.message}"
+                if check.message
+                else ""
+            )
+            print(
+                f"{check.name:<{name_width}}  "
+                f"{check.status.label:<7}"
+                f"{message}"
+            )
+
+    print()
+    print("Summary")
+    print("-------")
+    print(f"Checks                 : {result.check_count}")
+    print(f"OK                     : {result.ok_count}")
+    print(f"Warnings               : {result.warning_count}")
+    print(f"Errors                 : {result.error_count}")
+    print(f"Overall                : {result.overall_label}")
+
+    return result.exit_code
 
 
 def command_init(config_path: Path) -> int:
@@ -955,6 +1002,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "status":
         return command_status(args.config)
+
+    if args.command == "doctor":
+        return command_doctor(args.config)
 
     if args.command == "init":
         return command_init(args.config)
