@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from routecollector.doctor.bird_checks import check_bird
 from routecollector.doctor.checks import (
     check_directories,
     check_environment,
@@ -30,6 +31,11 @@ DEFAULT_DOCTOR_DIRECTORIES = (
 
 DEFAULT_DOCTOR_DATABASE = Path("state/state.db")
 DEFAULT_DOCTOR_SERVICES = Path("config/services")
+DEFAULT_BIRD_MAIN_CONFIG = Path("/etc/bird/bird.conf")
+DEFAULT_BIRD_GENERATED_CONFIG = Path("bird/routecollector.conf")
+DEFAULT_BIRD_INSTALLED_CONFIG = Path(
+    "/etc/bird/routecollector.conf"
+)
 
 
 def build_doctor_runner(
@@ -37,6 +43,9 @@ def build_doctor_runner(
     directories: tuple[Path, ...] = DEFAULT_DOCTOR_DIRECTORIES,
     database_path: Path = DEFAULT_DOCTOR_DATABASE,
     services_dir: Path = DEFAULT_DOCTOR_SERVICES,
+    bird_main_config: Path = DEFAULT_BIRD_MAIN_CONFIG,
+    bird_generated_config: Path = DEFAULT_BIRD_GENERATED_CONFIG,
+    bird_installed_config: Path = DEFAULT_BIRD_INSTALLED_CONFIG,
 ) -> DoctorRunner:
     """Create the default read-only diagnostic runner."""
 
@@ -59,6 +68,13 @@ def build_doctor_runner(
     runner.register(
         lambda: check_source_plugins(
             services_dir
+        )
+    )
+    runner.register(
+        lambda: check_bird(
+            main_config=bird_main_config,
+            generated_config=bird_generated_config,
+            installed_config=bird_installed_config,
         )
     )
 
