@@ -1,5 +1,9 @@
 """Dynamic DNS observation support."""
 
+from routecollector.dynamic.config_loader import (
+    DynamicConfigError,
+    DynamicConfigLoader,
+)
 from routecollector.dynamic.domain_matcher import (
     DomainMatch,
     DomainMatcher,
@@ -10,4 +14,6 @@ __all__ = [
     "DomainMatch",
     "DomainMatcher",
     "DomainMatchRule",
+    "DynamicConfigError",
+    "DynamicConfigLoader",
 ]

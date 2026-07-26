@@ -19,3 +19,22 @@ sources:
 
   - type: domain-list-community
     list: youtube
+
+dynamic:
+  enabled: true
+
+  match:
+    domains:
+      - youtube.com
+      - youtu.be
+      - youtube-nocookie.com
+      - googlevideo.com
+      - ytimg.com
+      - ggpht.com
+      - youtubei.googleapis.com
+      - youtube.googleapis.com
+      - gvt1.com
+      - gvt2.com
+      - googleusercontent.com
+
+    include_subdomains: true
