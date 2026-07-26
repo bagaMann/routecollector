@@ -18,6 +18,11 @@ from routecollector.dynamic.observation_store import (
     DynamicObservationStore,
     DynamicStoreResult,
 )
+from routecollector.dynamic.publisher import (
+    DynamicPublishError,
+    DynamicPublisher,
+    DynamicPublishResult,
+)
 
 __all__ = [
     "DnsAnswerRecord",
@@ -28,6 +33,9 @@ __all__ = [
     "DynamicConfigLoader",
     "DynamicDnsObservation",
     "DynamicObservationStore",
+    "DynamicPublishError",
+    "DynamicPublisher",
+    "DynamicPublishResult",
     "DynamicStoreResult",
     "build_dynamic_observations",
 ]
