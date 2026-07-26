@@ -14,6 +14,10 @@ from routecollector.dynamic.domain_matcher import (
     DomainMatcher,
     DomainMatchRule,
 )
+from routecollector.dynamic.observation_store import (
+    DynamicObservationStore,
+    DynamicStoreResult,
+)
 
 __all__ = [
     "DnsAnswerRecord",
@@ -23,5 +27,7 @@ __all__ = [
     "DynamicConfigError",
     "DynamicConfigLoader",
     "DynamicDnsObservation",
+    "DynamicObservationStore",
+    "DynamicStoreResult",
     "build_dynamic_observations",
 ]
