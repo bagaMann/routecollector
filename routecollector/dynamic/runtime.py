@@ -23,7 +23,12 @@ from routecollector.dynamic.observation_store import (
     DynamicObservationStore,
 )
 from routecollector.dynamic.processor import DynamicDnsProcessor
+from routecollector.dynamic.publish_queue import (
+    DynamicPublishQueue,
+)
 from routecollector.dynamic.publisher import DynamicPublisher
+from routecollector.dynamic.route_cache import DynamicRouteCache
+from routecollector.planner.planner import RoutePlanner
 
 
 @dataclass(slots=True, frozen=True)
@@ -43,6 +48,8 @@ class DynamicRuntimeConfig:
     max_age_days: int = 30
     enable_ipv6: bool = False
     global_only: bool = True
+    debounce_seconds: float = 0.25
+    publish_wait_timeout_seconds: float = 10.0
 
     def __post_init__(self) -> None:
         if self.dynamic_confidence <= 0:
@@ -73,7 +80,6 @@ class DynamicRuntime:
                 "Application logger is not initialized"
             )
 
-        self._app = app
         self._config = config
         self._logger = app.logger
         self._stopped = Event()
@@ -85,6 +91,23 @@ class DynamicRuntime:
         store = DynamicObservationStore(
             app.repository,
             confidence=config.dynamic_confidence,
+        )
+
+        planner = RoutePlanner(
+            repository=app.repository,
+            min_confidence_ipv4=(
+                config.min_confidence_ipv4
+            ),
+            min_confidence_ipv6=(
+                config.min_confidence_ipv6
+            ),
+            max_age_days=config.max_age_days,
+            enable_ipv6=config.enable_ipv6,
+        )
+
+        route_cache = DynamicRouteCache(
+            route.prefix
+            for route in planner.build_plan()
         )
 
         publisher = DynamicPublisher(
@@ -102,10 +125,19 @@ class DynamicRuntime:
             enable_ipv6=config.enable_ipv6,
         )
 
+        self._publish_queue = DynamicPublishQueue(
+            publisher=publisher,
+            route_cache=route_cache,
+            debounce_seconds=config.debounce_seconds,
+            wait_timeout_seconds=(
+                config.publish_wait_timeout_seconds
+            ),
+        )
+
         processor = DynamicDnsProcessor(
             matcher=matcher,
             store=store,
-            publisher=publisher,
+            publish_queue=self._publish_queue,
             enable_ipv6=config.enable_ipv6,
             global_only=config.global_only,
         )
@@ -142,10 +174,13 @@ class DynamicRuntime:
         )
 
     def stop(self) -> None:
-        """Stop the DNS proxy."""
+        """Stop the DNS proxy and publication worker."""
 
         if self._server.running:
             self._server.stop()
+
+        if self._publish_queue.running:
+            self._publish_queue.stop()
 
         self._stopped.set()
         self._logger.info(
@@ -207,7 +242,8 @@ class DynamicRuntime:
         self._logger.info(
             "Dynamic DNS processed: query=%s "
             "records=%s observations=%s stored=%s "
-            "routes=%s reloaded=%s protocol=%s",
+            "publication_required=%s routes=%s "
+            "reloaded=%s protocol=%s",
             event.query_name,
             event.record_count,
             result.observations_built,
@@ -216,6 +252,7 @@ class DynamicRuntime:
                 if store_result is not None
                 else 0
             ),
+            result.publication_required,
             (
                 publish_result.planned_routes
                 if publish_result is not None

@@ -38,6 +38,50 @@ class FakeServer:
         self.running = False
 
 
+class FakeRoute:
+    def __init__(
+        self,
+        prefix: str,
+    ) -> None:
+        self.prefix = prefix
+
+
+class FakePlanner:
+    def __init__(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        del args
+        del kwargs
+
+    def build_plan(
+        self,
+    ) -> list[FakeRoute]:
+        return [
+            FakeRoute(
+                "142.250.74.0/24"
+            )
+        ]
+
+
+class FakePublishQueue:
+    def __init__(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        del args
+        del kwargs
+
+        self.running = True
+        self.stop_calls = 0
+
+    def stop(self) -> None:
+        self.stop_calls += 1
+        self.running = False
+
+
 def make_app() -> SimpleNamespace:
     logger = logging.getLogger(
         "test-dynamic-runtime"
@@ -59,6 +103,7 @@ def patch_components(
     matcher = object()
     store = object()
     publisher = object()
+    queue = FakePublishQueue()
     processor = object()
     resolver = object()
 
@@ -74,8 +119,18 @@ def patch_components(
     )
     monkeypatch.setattr(
         runtime_module,
+        "RoutePlanner",
+        FakePlanner,
+    )
+    monkeypatch.setattr(
+        runtime_module,
         "DynamicPublisher",
         lambda *args, **kwargs: publisher,
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "DynamicPublishQueue",
+        lambda *args, **kwargs: queue,
     )
     monkeypatch.setattr(
         runtime_module,
