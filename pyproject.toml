@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 
 dependencies = [
     "PyYAML>=6.0",
+    "dnslib>=0.9.26",
     "dnspython>=2.7.0",
 ]
 

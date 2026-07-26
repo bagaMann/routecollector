@@ -9,6 +9,13 @@ from routecollector.dynamic.dns_observation import (
     DynamicDnsObservation,
     build_dynamic_observations,
 )
+from routecollector.dynamic.dns_proxy import (
+    DnsProxyConfig,
+    DnsProxyError,
+    DnsProxyEvent,
+    DynamicDnsProxyServer,
+    ForwardingDynamicResolver,
+)
 from routecollector.dynamic.domain_matcher import (
     DomainMatch,
     DomainMatcher,
@@ -30,6 +37,9 @@ from routecollector.dynamic.publisher import (
 
 __all__ = [
     "DnsAnswerRecord",
+    "DnsProxyConfig",
+    "DnsProxyError",
+    "DnsProxyEvent",
     "DomainMatch",
     "DomainMatcher",
     "DomainMatchRule",
@@ -37,11 +47,13 @@ __all__ = [
     "DynamicConfigLoader",
     "DynamicDnsObservation",
     "DynamicDnsProcessor",
+    "DynamicDnsProxyServer",
     "DynamicObservationStore",
     "DynamicProcessResult",
     "DynamicPublishError",
     "DynamicPublisher",
     "DynamicPublishResult",
     "DynamicStoreResult",
+    "ForwardingDynamicResolver",
     "build_dynamic_observations",
 ]
