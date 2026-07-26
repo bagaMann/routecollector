@@ -18,6 +18,10 @@ from routecollector.dynamic.observation_store import (
     DynamicObservationStore,
     DynamicStoreResult,
 )
+from routecollector.dynamic.processor import (
+    DynamicDnsProcessor,
+    DynamicProcessResult,
+)
 from routecollector.dynamic.publisher import (
     DynamicPublishError,
     DynamicPublisher,
@@ -32,7 +36,9 @@ __all__ = [
     "DynamicConfigError",
     "DynamicConfigLoader",
     "DynamicDnsObservation",
+    "DynamicDnsProcessor",
     "DynamicObservationStore",
+    "DynamicProcessResult",
     "DynamicPublishError",
     "DynamicPublisher",
     "DynamicPublishResult",
