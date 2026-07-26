@@ -34,6 +34,10 @@ from routecollector.dynamic.publisher import (
     DynamicPublisher,
     DynamicPublishResult,
 )
+from routecollector.dynamic.runtime import (
+    DynamicRuntime,
+    DynamicRuntimeConfig,
+)
 
 __all__ = [
     "DnsAnswerRecord",
@@ -53,6 +57,8 @@ __all__ = [
     "DynamicPublishError",
     "DynamicPublisher",
     "DynamicPublishResult",
+    "DynamicRuntime",
+    "DynamicRuntimeConfig",
     "DynamicStoreResult",
     "ForwardingDynamicResolver",
     "build_dynamic_observations",

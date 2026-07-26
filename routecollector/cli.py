@@ -13,6 +13,11 @@ from typing import Sequence
 from routecollector import __version__
 from routecollector.doctor import build_doctor_runner
 from routecollector.core.application import Application
+from routecollector.dynamic import (
+    DnsProxyConfig,
+    DynamicRuntime,
+    DynamicRuntimeConfig,
+)
 from routecollector.core.version import get_version
 from routecollector.exporter.bird import BirdExporter
 from routecollector.exporter.birdctl import BirdConfigInstaller, BirdControl
@@ -204,6 +209,61 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     add_route_policy_arguments(run_once_parser)
+
+    dns_proxy_parser = subparsers.add_parser(
+        "dns-proxy",
+        help="Run the dynamic DNS forwarding proxy",
+    )
+    dns_proxy_parser.add_argument(
+        "--listen",
+        default="127.0.0.1",
+        help="DNS proxy listen address",
+    )
+    dns_proxy_parser.add_argument(
+        "--port",
+        type=int,
+        default=5353,
+        help="DNS proxy listen port",
+    )
+    dns_proxy_parser.add_argument(
+        "--upstream",
+        default="1.1.1.1",
+        help="Upstream DNS server address",
+    )
+    dns_proxy_parser.add_argument(
+        "--upstream-port",
+        type=int,
+        default=53,
+        help="Upstream DNS server port",
+    )
+    dns_proxy_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=3.0,
+        help="Upstream DNS timeout in seconds",
+    )
+    dns_proxy_parser.add_argument(
+        "--udp-only",
+        action="store_true",
+        help="Disable the TCP listener",
+    )
+    dns_proxy_parser.add_argument(
+        "--tcp-only",
+        action="store_true",
+        help="Disable the UDP listener",
+    )
+    dns_proxy_parser.add_argument(
+        "--fail-closed",
+        action="store_true",
+        help="Fail DNS requests when dynamic processing fails",
+    )
+    dns_proxy_parser.add_argument(
+        "--dynamic-confidence",
+        type=int,
+        default=100,
+        help="Confidence assigned to dynamic DNS observations",
+    )
+    add_route_policy_arguments(dns_proxy_parser)
 
     daemon_parser = subparsers.add_parser(
         "daemon",
@@ -948,6 +1008,93 @@ def command_run_once(
 
     return 0
 
+def command_dns_proxy(
+    config_path: Path,
+    listen_address: str,
+    listen_port: int,
+    upstream_address: str,
+    upstream_port: int,
+    timeout_seconds: float,
+    udp_only: bool,
+    tcp_only: bool,
+    fail_closed: bool,
+    dynamic_confidence: int,
+    min_confidence_ipv4: int,
+    min_confidence_ipv6: int,
+    max_age_days: int,
+    enable_ipv6: bool,
+) -> int:
+    """Run the dynamic DNS forwarding proxy."""
+
+    if udp_only and tcp_only:
+        raise ValueError(
+            "--udp-only and --tcp-only cannot be used together"
+        )
+
+    app = get_app(config_path)
+
+    if app.logger is None:
+        raise RuntimeError("Logger is not initialized")
+
+    runtime = DynamicRuntime(
+        app=app,
+        config=DynamicRuntimeConfig(
+            dns_proxy=DnsProxyConfig(
+                listen_address=listen_address,
+                listen_port=listen_port,
+                upstream_address=upstream_address,
+                upstream_port=upstream_port,
+                timeout_seconds=timeout_seconds,
+                enable_udp=not tcp_only,
+                enable_tcp=not udp_only,
+                fail_open=not fail_closed,
+            ),
+            services_dir=DEFAULT_SERVICES_DIR,
+            generated_config=DEFAULT_BIRD_OUTPUT,
+            installed_config=DEFAULT_BIRD_TARGET,
+            main_bird_config=DEFAULT_BIRD_MAIN_CONFIG,
+            dynamic_confidence=dynamic_confidence,
+            min_confidence_ipv4=min_confidence_ipv4,
+            min_confidence_ipv6=min_confidence_ipv6,
+            max_age_days=max_age_days,
+            enable_ipv6=enable_ipv6,
+        ),
+    )
+
+    print("RouteCollector dynamic DNS proxy")
+    print("==============================")
+    print(
+        f"Listen       : "
+        f"{listen_address}:{listen_port}"
+    )
+    print(
+        f"Upstream     : "
+        f"{upstream_address}:{upstream_port}"
+    )
+    print(
+        "UDP          : "
+        + ("enabled" if not tcp_only else "disabled")
+    )
+    print(
+        "TCP          : "
+        + ("enabled" if not udp_only else "disabled")
+    )
+    print(
+        "Fail mode    : "
+        + ("closed" if fail_closed else "open")
+    )
+    print(
+        "IPv6 routes  : "
+        + ("enabled" if enable_ipv6 else "disabled")
+    )
+    print()
+    print("Press Ctrl+C to stop.")
+
+    runtime.run()
+
+    return 0
+
+
 def command_daemon(
     config_path: Path,
     interval_seconds: int,
@@ -1074,6 +1221,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.max_age_days,
             args.enable_ipv6,
             args.dry_run,
+        )
+
+    if args.command == "dns-proxy":
+        return command_dns_proxy(
+            args.config,
+            args.listen,
+            args.port,
+            args.upstream,
+            args.upstream_port,
+            args.timeout,
+            args.udp_only,
+            args.tcp_only,
+            args.fail_closed,
+            args.dynamic_confidence,
+            args.min_confidence_ipv4,
+            args.min_confidence_ipv6,
+            args.max_age_days,
+            args.enable_ipv6,
         )
 
     if args.command == "daemon":
