@@ -21,6 +21,10 @@ from routecollector.dynamic.domain_matcher import (
     DomainMatcher,
     DomainMatchRule,
 )
+from routecollector.dynamic.fast_publish import (
+    DynamicFastPublishPolicy,
+    DynamicFastPublishResult,
+)
 from routecollector.dynamic.observation_store import (
     DynamicObservationStore,
     DynamicStoreResult,
@@ -58,6 +62,8 @@ __all__ = [
     "DynamicDnsObservation",
     "DynamicDnsProcessor",
     "DynamicDnsProxyServer",
+    "DynamicFastPublishPolicy",
+    "DynamicFastPublishResult",
     "DynamicObservationStore",
     "DynamicProcessResult",
     "DynamicPublishError",

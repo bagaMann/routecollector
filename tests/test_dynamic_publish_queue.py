@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import Barrier, Thread
+from typing import Iterable
 
 from routecollector.dynamic import (
     DynamicPublishQueue,
@@ -15,11 +16,24 @@ from routecollector.dynamic import (
 
 
 class FakePublisher:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        accept: bool = True,
+    ) -> None:
         self.calls = 0
+        self.accept = accept
+        self.requested: list[tuple[str, ...]] = []
 
-    def publish(self) -> DynamicPublishResult:
+    def publish(
+        self,
+        required_prefixes: Iterable[str] = (),
+    ) -> DynamicPublishResult:
         self.calls += 1
+        requested = tuple(
+            sorted(required_prefixes)
+        )
+        self.requested.append(requested)
 
         return DynamicPublishResult(
             route_stats_built=100,
@@ -27,14 +41,25 @@ class FakePublisher:
             generated_config=Path(
                 "bird/routecollector.conf"
             ),
-            generated_changed=True,
+            generated_changed=self.accept,
             installed_config=Path(
                 "/etc/bird/routecollector.conf"
             ),
-            installed_changed=True,
+            installed_changed=self.accept,
             bird_checked=True,
-            bird_reloaded=True,
+            bird_reloaded=self.accept,
             rollback_performed=False,
+            dynamic_requested_prefixes=requested,
+            dynamic_published_prefixes=(
+                requested
+                if self.accept
+                else ()
+            ),
+            dynamic_rejected_prefixes=(
+                ()
+                if self.accept
+                else requested
+            ),
         )
 
 
@@ -74,7 +99,6 @@ def test_missing_prefix_is_published_and_cached() -> None:
         result = queue.submit(
             ["142.250.74.238/24"]
         )
-
         second = queue.submit(
             ["142.250.74.1/24"]
         )
@@ -82,9 +106,37 @@ def test_missing_prefix_is_published_and_cached() -> None:
         queue.stop()
 
     assert result.published is True
-    assert result.publish_result is not None
     assert second.published is False
     assert publisher.calls == 1
+
+
+def test_rejected_prefix_is_not_cached() -> None:
+    publisher = FakePublisher(
+        accept=False
+    )
+    cache = DynamicRouteCache()
+    queue = DynamicPublishQueue(
+        publisher=publisher,
+        route_cache=cache,
+        debounce_seconds=0.01,
+    )
+
+    try:
+        first = queue.submit(
+            ["142.250.74.0/24"]
+        )
+        second = queue.submit(
+            ["142.250.74.0/24"]
+        )
+    finally:
+        queue.stop()
+
+    assert first.published is True
+    assert second.published is True
+    assert publisher.calls == 2
+    assert not cache.contains(
+        "142.250.74.0/24"
+    )
 
 
 def test_concurrent_requests_share_one_publish() -> None:

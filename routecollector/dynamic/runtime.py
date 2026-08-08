@@ -19,13 +19,9 @@ from routecollector.dynamic.dns_proxy import (
     DynamicDnsProxyServer,
     ForwardingDynamicResolver,
 )
-from routecollector.dynamic.observation_store import (
-    DynamicObservationStore,
-)
+from routecollector.dynamic.observation_store import DynamicObservationStore
 from routecollector.dynamic.processor import DynamicDnsProcessor
-from routecollector.dynamic.publish_queue import (
-    DynamicPublishQueue,
-)
+from routecollector.dynamic.publish_queue import DynamicPublishQueue
 from routecollector.dynamic.publisher import DynamicPublisher
 from routecollector.dynamic.route_cache import DynamicRouteCache
 from routecollector.planner.planner import RoutePlanner
@@ -45,6 +41,9 @@ class DynamicRuntimeConfig:
     dynamic_confidence: int = 100
     min_confidence_ipv4: int = 60
     min_confidence_ipv6: int = 60
+    dynamic_min_confidence_ipv4: int = 25
+    dynamic_min_confidence_ipv6: int = 25
+    dynamic_min_source_trust: int = 50
     max_age_days: int = 30
     enable_ipv6: bool = False
     global_only: bool = True
@@ -56,6 +55,25 @@ class DynamicRuntimeConfig:
             raise ValueError(
                 "Dynamic confidence must be positive"
             )
+
+        for name, value in (
+            (
+                "Dynamic IPv4 confidence",
+                self.dynamic_min_confidence_ipv4,
+            ),
+            (
+                "Dynamic IPv6 confidence",
+                self.dynamic_min_confidence_ipv6,
+            ),
+            (
+                "Dynamic source trust",
+                self.dynamic_min_source_trust,
+            ),
+        ):
+            if not 0 <= value <= 100:
+                raise ValueError(
+                    f"{name} must be between 0 and 100"
+                )
 
 
 class DynamicRuntime:
@@ -95,12 +113,8 @@ class DynamicRuntime:
 
         planner = RoutePlanner(
             repository=app.repository,
-            min_confidence_ipv4=(
-                config.min_confidence_ipv4
-            ),
-            min_confidence_ipv6=(
-                config.min_confidence_ipv6
-            ),
+            min_confidence_ipv4=config.min_confidence_ipv4,
+            min_confidence_ipv6=config.min_confidence_ipv6,
             max_age_days=config.max_age_days,
             enable_ipv6=config.enable_ipv6,
         )
@@ -115,11 +129,16 @@ class DynamicRuntime:
             generated_config=config.generated_config,
             installed_config=config.installed_config,
             main_bird_config=config.main_bird_config,
-            min_confidence_ipv4=(
-                config.min_confidence_ipv4
+            min_confidence_ipv4=config.min_confidence_ipv4,
+            min_confidence_ipv6=config.min_confidence_ipv6,
+            dynamic_min_confidence_ipv4=(
+                config.dynamic_min_confidence_ipv4
             ),
-            min_confidence_ipv6=(
-                config.min_confidence_ipv6
+            dynamic_min_confidence_ipv6=(
+                config.dynamic_min_confidence_ipv6
+            ),
+            dynamic_min_source_trust=(
+                config.dynamic_min_source_trust
             ),
             max_age_days=config.max_age_days,
             enable_ipv6=config.enable_ipv6,
@@ -155,18 +174,12 @@ class DynamicRuntime:
 
     @property
     def running(self) -> bool:
-        """Return whether the DNS server is running."""
-
         return self._server.running
 
     def start(self) -> None:
-        """Start UDP and TCP DNS listeners."""
-
         self._server.start()
-
         self._logger.info(
-            "Dynamic DNS proxy started on %s:%s; "
-            "upstream=%s:%s",
+            "Dynamic DNS proxy started on %s:%s; upstream=%s:%s",
             self._config.dns_proxy.listen_address,
             self._config.dns_proxy.listen_port,
             self._config.dns_proxy.upstream_address,
@@ -174,8 +187,6 @@ class DynamicRuntime:
         )
 
     def stop(self) -> None:
-        """Stop the DNS proxy and publication worker."""
-
         if self._server.running:
             self._server.stop()
 
@@ -183,13 +194,9 @@ class DynamicRuntime:
             self._publish_queue.stop()
 
         self._stopped.set()
-        self._logger.info(
-            "Dynamic DNS proxy stopped"
-        )
+        self._logger.info("Dynamic DNS proxy stopped")
 
     def run(self) -> None:
-        """Run until SIGINT or SIGTERM."""
-
         previous_handlers = self._install_signal_handlers()
 
         try:
@@ -228,8 +235,7 @@ class DynamicRuntime:
 
         if result is None or not result.matched:
             self._logger.debug(
-                "DNS response ignored: query=%s "
-                "records=%s protocol=%s",
+                "DNS response ignored: query=%s records=%s protocol=%s",
                 event.query_name,
                 event.record_count,
                 event.protocol,
@@ -243,6 +249,7 @@ class DynamicRuntime:
             "Dynamic DNS processed: query=%s "
             "records=%s observations=%s stored=%s "
             "publication_required=%s routes=%s "
+            "dynamic_published=%s dynamic_rejected=%s "
             "reloaded=%s protocol=%s",
             event.query_name,
             event.record_count,
@@ -255,6 +262,20 @@ class DynamicRuntime:
             result.publication_required,
             (
                 publish_result.planned_routes
+                if publish_result is not None
+                else 0
+            ),
+            (
+                len(
+                    publish_result.dynamic_published_prefixes
+                )
+                if publish_result is not None
+                else 0
+            ),
+            (
+                len(
+                    publish_result.dynamic_rejected_prefixes
+                )
                 if publish_result is not None
                 else 0
             ),
@@ -275,9 +296,7 @@ class DynamicRuntime:
             signal.SIGINT,
             signal.SIGTERM,
         ):
-            handlers[signum] = signal.getsignal(
-                signum
-            )
+            handlers[signum] = signal.getsignal(signum)
             signal.signal(
                 signum,
                 self._signal_handler,
@@ -301,7 +320,6 @@ class DynamicRuntime:
         frame: FrameType | None,
     ) -> None:
         del frame
-
         self._logger.info(
             "Dynamic DNS proxy received signal %s",
             signum,

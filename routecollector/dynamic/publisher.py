@@ -3,10 +3,14 @@ Fast publication path for dynamic DNS observations.
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Iterable, Protocol
 
+from routecollector.dynamic.fast_publish import (
+    DynamicFastPublishPolicy,
+)
 from routecollector.exporter.bird import BirdExporter
 from routecollector.exporter.birdctl import (
     BirdConfigInstaller,
@@ -34,7 +38,7 @@ class DynamicPublishRepository(Protocol):
         """Rebuild route statistics."""
 
     def list_route_stats(self) -> list[object]:
-        """Return route statistics for the planner."""
+        """Return route statistics for the planner and fast policy."""
 
 
 class DynamicPlanner(Protocol):
@@ -96,14 +100,18 @@ class DynamicPublishResult:
     bird_checked: bool
     bird_reloaded: bool
     rollback_performed: bool
+    dynamic_requested_prefixes: tuple[str, ...] = ()
+    dynamic_published_prefixes: tuple[str, ...] = ()
+    dynamic_rejected_prefixes: tuple[str, ...] = ()
 
 
 class DynamicPublisher:
     """
     Publish a route plan without source sync or DNS resolution.
 
-    The publisher rebuilds statistics from already stored observations,
-    creates the complete route plan and safely updates BIRD.
+    The normal planner remains authoritative for ordinary routes. Prefixes
+    explicitly supplied by the matched dynamic-DNS path may additionally
+    use the conservative fast-publication policy.
     """
 
     def __init__(
@@ -119,7 +127,11 @@ class DynamicPublisher:
         enable_ipv6: bool = False,
         ipv4_prefix: int = 24,
         ipv6_prefix: int = 48,
+        dynamic_min_confidence_ipv4: int = 25,
+        dynamic_min_confidence_ipv6: int = 25,
+        dynamic_min_source_trust: int = 50,
         planner: DynamicPlanner | None = None,
+        fast_policy: DynamicFastPublishPolicy | None = None,
         exporter: DynamicExporter | None = None,
         installer: DynamicInstaller | None = None,
         bird: DynamicBirdControl | None = None,
@@ -150,9 +162,6 @@ class DynamicPublisher:
             )
 
         self._repository = repository
-        self._generated_config = generated_config
-        self._installed_config = installed_config
-        self._main_bird_config = main_bird_config
         self._ipv4_prefix = ipv4_prefix
         self._ipv6_prefix = ipv6_prefix
 
@@ -164,20 +173,28 @@ class DynamicPublisher:
             enable_ipv6=enable_ipv6,
         )
 
+        self._fast_policy = fast_policy or DynamicFastPublishPolicy(
+            min_confidence_ipv4=dynamic_min_confidence_ipv4,
+            min_confidence_ipv6=dynamic_min_confidence_ipv6,
+            min_source_trust=dynamic_min_source_trust,
+            enable_ipv6=enable_ipv6,
+        )
+
         self._exporter = exporter or BirdExporter(
             generated_config
         )
-
         self._installer = installer or BirdConfigInstaller(
             source_file=generated_config,
             target_file=installed_config,
             main_config=main_bird_config,
         )
-
         self._bird = bird or BirdControl()
 
-    def publish(self) -> DynamicPublishResult:
-        """Rebuild the route plan and safely publish it to BIRD."""
+    def publish(
+        self,
+        required_prefixes: Iterable[str] = (),
+    ) -> DynamicPublishResult:
+        """Rebuild, augment and safely publish the route plan."""
 
         route_stats_built = (
             self._repository.rebuild_route_stats(
@@ -186,7 +203,14 @@ class DynamicPublisher:
             )
         )
 
-        routes = self._planner.build_plan()
+        base_routes = self._planner.build_plan()
+
+        fast_result = self._fast_policy.augment(
+            base_routes=base_routes,
+            route_stats=self._repository.list_route_stats(),
+            required_prefixes=required_prefixes,
+        )
+        routes = list(fast_result.routes)
 
         if not routes:
             raise DynamicPublishError(
@@ -243,4 +267,13 @@ class DynamicPublisher:
             bird_checked=True,
             bird_reloaded=bird_reloaded,
             rollback_performed=rollback_performed,
+            dynamic_requested_prefixes=(
+                fast_result.requested_prefixes
+            ),
+            dynamic_published_prefixes=(
+                fast_result.accepted_prefixes
+            ),
+            dynamic_rejected_prefixes=(
+                fast_result.rejected_prefixes
+            ),
         )

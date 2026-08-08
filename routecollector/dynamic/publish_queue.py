@@ -28,8 +28,11 @@ class DynamicPublishQueueError(RuntimeError):
 class DynamicPublisherLike(Protocol):
     """Publisher interface required by the queue."""
 
-    def publish(self) -> DynamicPublishResult:
-        """Publish the current complete route plan."""
+    def publish(
+        self,
+        required_prefixes: Iterable[str] = (),
+    ) -> DynamicPublishResult:
+        """Publish the current route plan with requested dynamic prefixes."""
 
 
 @dataclass(slots=True, frozen=True)
@@ -55,8 +58,8 @@ class DynamicPublishQueue:
     """
     Combine concurrent route additions into one publication cycle.
 
-    Requests for already cached prefixes return immediately. Requests
-    containing new prefixes wait for one debounced publication batch.
+    Only prefixes confirmed as present in the published plan are added
+    to the route cache.
     """
 
     def __init__(
@@ -80,9 +83,7 @@ class DynamicPublishQueue:
         self._publisher = publisher
         self._route_cache = route_cache
         self._debounce_seconds = debounce_seconds
-        self._wait_timeout_seconds = (
-            wait_timeout_seconds
-        )
+        self._wait_timeout_seconds = wait_timeout_seconds
 
         self._condition = Condition()
         self._pending: set[IPNetwork] = set()
@@ -211,14 +212,19 @@ class DynamicPublishQueue:
                 self._waiters = []
 
             try:
-                result = self._publisher.publish()
+                result = self._publisher.publish(
+                    str(prefix)
+                    for prefix in batch_prefixes
+                )
+
                 self._route_cache.add(
-                    batch_prefixes
+                    result.dynamic_published_prefixes
                 )
 
                 for waiter in batch_waiters:
                     waiter.result = result
                     waiter.event.set()
+
             except BaseException as exc:
                 for waiter in batch_waiters:
                     waiter.error = exc
