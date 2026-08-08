@@ -35,8 +35,6 @@ class DynamicRouteCache:
         self,
         prefixes: Iterable[str | IPNetwork],
     ) -> None:
-        """Replace the complete cached prefix set."""
-
         normalized = {
             self._normalize_prefix(prefix)
             for prefix in prefixes
@@ -49,8 +47,6 @@ class DynamicRouteCache:
         self,
         prefixes: Iterable[str | IPNetwork],
     ) -> None:
-        """Add successfully published prefixes."""
-
         normalized = {
             self._normalize_prefix(prefix)
             for prefix in prefixes
@@ -59,12 +55,26 @@ class DynamicRouteCache:
         with self._lock:
             self._prefixes.update(normalized)
 
+    def discard(
+        self,
+        prefixes: Iterable[str | IPNetwork],
+    ) -> None:
+        """Remove prefixes from the cache if present."""
+
+        normalized = {
+            self._normalize_prefix(prefix)
+            for prefix in prefixes
+        }
+
+        with self._lock:
+            self._prefixes.difference_update(
+                normalized
+            )
+
     def contains(
         self,
         prefix: str | IPNetwork,
     ) -> bool:
-        """Return whether a prefix is already cached."""
-
         normalized = self._normalize_prefix(prefix)
 
         with self._lock:
@@ -74,8 +84,6 @@ class DynamicRouteCache:
         self,
         address: str | IPAddress,
     ) -> bool:
-        """Return whether an address belongs to any cached prefix."""
-
         normalized_address = (
             address
             if isinstance(
@@ -89,15 +97,14 @@ class DynamicRouteCache:
             return any(
                 normalized_address in prefix
                 for prefix in self._prefixes
-                if prefix.version == normalized_address.version
+                if prefix.version
+                == normalized_address.version
             )
 
     def missing(
         self,
         prefixes: Iterable[str | IPNetwork],
     ) -> tuple[IPNetwork, ...]:
-        """Return normalized prefixes absent from the cache."""
-
         normalized = {
             self._normalize_prefix(prefix)
             for prefix in prefixes
@@ -120,8 +127,6 @@ class DynamicRouteCache:
         )
 
     def snapshot(self) -> tuple[IPNetwork, ...]:
-        """Return an immutable sorted cache snapshot."""
-
         with self._lock:
             prefixes = tuple(self._prefixes)
 

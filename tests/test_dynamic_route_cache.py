@@ -45,21 +45,34 @@ def test_cache_returns_missing_prefixes() -> None:
     ) == ("8.8.8.0/24",)
 
 
-def test_cache_add_and_replace() -> None:
+def test_cache_add_discard_and_replace() -> None:
     cache = DynamicRouteCache()
 
     cache.add(
-        ["8.8.8.0/24"]
-    )
-    assert len(cache) == 1
-
-    cache.replace(
-        ["1.1.1.0/24"]
+        [
+            "8.8.8.0/24",
+            "1.1.1.0/24",
+        ]
     )
 
+    cache.discard(
+        ["8.8.8.8/24"]
+    )
+
+    assert not cache.contains(
+        "8.8.8.0/24"
+    )
     assert cache.contains(
         "1.1.1.0/24"
     )
+
+    cache.replace(
+        ["9.9.9.0/24"]
+    )
+
+    assert cache.contains(
+        "9.9.9.0/24"
+    )
     assert not cache.contains(
-        "8.8.8.0/24"
+        "1.1.1.0/24"
     )

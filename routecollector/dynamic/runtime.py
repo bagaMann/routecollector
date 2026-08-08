@@ -19,6 +19,10 @@ from routecollector.dynamic.dns_proxy import (
     DynamicDnsProxyServer,
     ForwardingDynamicResolver,
 )
+from routecollector.dynamic.lease import (
+    DynamicLeaseManager,
+    DynamicRouteLeaseStore,
+)
 from routecollector.dynamic.observation_store import DynamicObservationStore
 from routecollector.dynamic.processor import DynamicDnsProcessor
 from routecollector.dynamic.publish_queue import DynamicPublishQueue
@@ -29,8 +33,6 @@ from routecollector.planner.planner import RoutePlanner
 
 @dataclass(slots=True, frozen=True)
 class DynamicRuntimeConfig:
-    """Configuration required to assemble the dynamic runtime."""
-
     dns_proxy: DnsProxyConfig
     services_dir: Path = Path("config/services")
     generated_config: Path = Path("bird/routecollector.conf")
@@ -38,12 +40,17 @@ class DynamicRuntimeConfig:
         "/etc/bird/routecollector.conf"
     )
     main_bird_config: Path = Path("/etc/bird/bird.conf")
+    lease_state: Path = Path(
+        "state/dynamic-route-leases.json"
+    )
     dynamic_confidence: int = 100
     min_confidence_ipv4: int = 60
     min_confidence_ipv6: int = 60
     dynamic_min_confidence_ipv4: int = 25
     dynamic_min_confidence_ipv6: int = 25
     dynamic_min_source_trust: int = 50
+    dynamic_lease_seconds: int = 86400
+    dynamic_lease_check_seconds: float = 60.0
     max_age_days: int = 30
     enable_ipv6: bool = False
     global_only: bool = True
@@ -71,14 +78,22 @@ class DynamicRuntimeConfig:
             ),
         ):
             if not 0 <= value <= 100:
-                raise ValueError(
+                 raise ValueError(
                     f"{name} must be between 0 and 100"
-                )
+                 )
+
+        if self.dynamic_lease_seconds <= 0:
+            raise ValueError(
+                "Dynamic route lease must be greater than zero"
+            )
+
+        if self.dynamic_lease_check_seconds <= 0:
+            raise ValueError(
+                "Dynamic lease check interval must be positive"
+            )
 
 
 class DynamicRuntime:
-    """Own the complete dynamic DNS proxy processing pipeline."""
-
     def __init__(
         self,
         *,
@@ -92,7 +107,6 @@ class DynamicRuntime:
             raise RuntimeError(
                 "Application repository is not initialized"
             )
-
         if app.logger is None:
             raise RuntimeError(
                 "Application logger is not initialized"
@@ -119,9 +133,17 @@ class DynamicRuntime:
             enable_ipv6=config.enable_ipv6,
         )
 
+        self._lease_store = DynamicRouteLeaseStore(
+            config.lease_state,
+            lease_seconds=config.dynamic_lease_seconds,
+        )
+
         route_cache = DynamicRouteCache(
             route.prefix
             for route in planner.build_plan()
+        )
+        route_cache.add(
+            self._lease_store.active_prefixes()
         )
 
         publisher = DynamicPublisher(
@@ -147,9 +169,19 @@ class DynamicRuntime:
         self._publish_queue = DynamicPublishQueue(
             publisher=publisher,
             route_cache=route_cache,
+            lease_store=self._lease_store,
             debounce_seconds=config.debounce_seconds,
             wait_timeout_seconds=(
                 config.publish_wait_timeout_seconds
+            ),
+        )
+
+        self._lease_manager = DynamicLeaseManager(
+            store=self._lease_store,
+            publisher=publisher,
+            route_cache=route_cache,
+            interval_seconds=(
+                config.dynamic_lease_check_seconds
             ),
         )
 
@@ -177,13 +209,17 @@ class DynamicRuntime:
         return self._server.running
 
     def start(self) -> None:
+        self._lease_manager.start()
         self._server.start()
+
         self._logger.info(
-            "Dynamic DNS proxy started on %s:%s; upstream=%s:%s",
+            "Dynamic DNS proxy started on %s:%s; "
+            "upstream=%s:%s lease=%ss",
             self._config.dns_proxy.listen_address,
             self._config.dns_proxy.listen_port,
             self._config.dns_proxy.upstream_address,
             self._config.dns_proxy.upstream_port,
+            self._config.dynamic_lease_seconds,
         )
 
     def stop(self) -> None:
@@ -193,8 +229,13 @@ class DynamicRuntime:
         if self._publish_queue.running:
             self._publish_queue.stop()
 
+        if self._lease_manager.running:
+            self._lease_manager.stop()
+
         self._stopped.set()
-        self._logger.info("Dynamic DNS proxy stopped")
+        self._logger.info(
+            "Dynamic DNS proxy stopped"
+        )
 
     def run(self) -> None:
         previous_handlers = self._install_signal_handlers()
@@ -234,31 +275,19 @@ class DynamicRuntime:
         result = event.process_result
 
         if result is None or not result.matched:
-            self._logger.debug(
-                "DNS response ignored: query=%s records=%s protocol=%s",
-                event.query_name,
-                event.record_count,
-                event.protocol,
-            )
             return
 
-        store_result = result.store_result
         publish_result = result.publish_result
 
         self._logger.info(
             "Dynamic DNS processed: query=%s "
-            "records=%s observations=%s stored=%s "
+            "records=%s observations=%s "
             "publication_required=%s routes=%s "
             "dynamic_published=%s dynamic_rejected=%s "
             "reloaded=%s protocol=%s",
             event.query_name,
             event.record_count,
             result.observations_built,
-            (
-                store_result.stored
-                if store_result is not None
-                else 0
-            ),
             result.publication_required,
             (
                 publish_result.planned_routes

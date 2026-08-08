@@ -25,6 +25,12 @@ from routecollector.dynamic.fast_publish import (
     DynamicFastPublishPolicy,
     DynamicFastPublishResult,
 )
+from routecollector.dynamic.lease import (
+    DynamicLeaseError,
+    DynamicLeaseManager,
+    DynamicRouteLease,
+    DynamicRouteLeaseStore,
+)
 from routecollector.dynamic.observation_store import (
     DynamicObservationStore,
     DynamicStoreResult,
@@ -64,6 +70,8 @@ __all__ = [
     "DynamicDnsProxyServer",
     "DynamicFastPublishPolicy",
     "DynamicFastPublishResult",
+    "DynamicLeaseError",
+    "DynamicLeaseManager",
     "DynamicObservationStore",
     "DynamicProcessResult",
     "DynamicPublishError",
@@ -73,6 +81,8 @@ __all__ = [
     "DynamicPublisher",
     "DynamicQueueResult",
     "DynamicRouteCache",
+    "DynamicRouteLease",
+    "DynamicRouteLeaseStore",
     "DynamicRuntime",
     "DynamicRuntimeConfig",
     "DynamicStoreResult",

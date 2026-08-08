@@ -10,12 +10,8 @@ from threading import Condition, Event, Thread
 from time import monotonic
 from typing import Iterable, Protocol
 
-from routecollector.dynamic.publisher import (
-    DynamicPublishResult,
-)
-from routecollector.dynamic.route_cache import (
-    DynamicRouteCache,
-)
+from routecollector.dynamic.publisher import DynamicPublishResult
+from routecollector.dynamic.route_cache import DynamicRouteCache
 
 
 IPNetwork = IPv4Network | IPv6Network
@@ -26,19 +22,23 @@ class DynamicPublishQueueError(RuntimeError):
 
 
 class DynamicPublisherLike(Protocol):
-    """Publisher interface required by the queue."""
-
     def publish(
         self,
         required_prefixes: Iterable[str] = (),
     ) -> DynamicPublishResult:
-        """Publish the current route plan with requested dynamic prefixes."""
+        ...
+
+
+class DynamicLeaseStoreLike(Protocol):
+    def renew(
+        self,
+        prefixes: Iterable[str],
+    ) -> object:
+        ...
 
 
 @dataclass(slots=True, frozen=True)
 class DynamicQueueResult:
-    """Result returned to one DNS request."""
-
     requested_prefixes: tuple[IPNetwork, ...]
     missing_prefixes: tuple[IPNetwork, ...]
     published: bool
@@ -55,18 +55,14 @@ class _Waiter:
 
 
 class DynamicPublishQueue:
-    """
-    Combine concurrent route additions into one publication cycle.
-
-    Only prefixes confirmed as present in the published plan are added
-    to the route cache.
-    """
+    """Batch concurrent dynamic publications and maintain route leases."""
 
     def __init__(
         self,
         *,
         publisher: DynamicPublisherLike,
         route_cache: DynamicRouteCache,
+        lease_store: DynamicLeaseStoreLike | None = None,
         debounce_seconds: float = 0.25,
         wait_timeout_seconds: float = 10.0,
     ) -> None:
@@ -74,7 +70,6 @@ class DynamicPublishQueue:
             raise ValueError(
                 "Debounce interval cannot be negative"
             )
-
         if wait_timeout_seconds <= 0:
             raise ValueError(
                 "Publish wait timeout must be positive"
@@ -82,6 +77,7 @@ class DynamicPublishQueue:
 
         self._publisher = publisher
         self._route_cache = route_cache
+        self._lease_store = lease_store
         self._debounce_seconds = debounce_seconds
         self._wait_timeout_seconds = wait_timeout_seconds
 
@@ -101,8 +97,6 @@ class DynamicPublishQueue:
         self,
         prefixes: Iterable[str | IPNetwork],
     ) -> DynamicQueueResult:
-        """Publish missing prefixes, batching concurrent requests."""
-
         requested = self._normalize(prefixes)
         missing = self._route_cache.missing(
             requested
@@ -152,8 +146,6 @@ class DynamicPublishQueue:
         )
 
     def stop(self) -> None:
-        """Stop the worker and release pending waiters."""
-
         with self._condition:
             self._stopping = True
             self._condition.notify_all()
@@ -164,8 +156,6 @@ class DynamicPublishQueue:
 
     @property
     def running(self) -> bool:
-        """Return whether the worker thread is active."""
-
         return self._worker.is_alive()
 
     def _run(self) -> None:
@@ -220,6 +210,11 @@ class DynamicPublishQueue:
                 self._route_cache.add(
                     result.dynamic_published_prefixes
                 )
+
+                if self._lease_store is not None:
+                    self._lease_store.renew(
+                        result.dynamic_published_prefixes
+                    )
 
                 for waiter in batch_waiters:
                     waiter.result = result
