@@ -17,6 +17,7 @@ class RouteScoreInput:
     unique_resolvers: int
     first_seen: datetime
     last_seen: datetime
+    source_trust: int = 0
 
 
 @dataclass(slots=True, frozen=True)
@@ -28,6 +29,8 @@ class RouteScore:
     domain_score: int
     resolver_score: int
     history_score: int
+    source_score: int = 0
+    source_trust: int = 0
 
 
 class RouteScorer:
@@ -37,6 +40,12 @@ class RouteScorer:
     MAX_DOMAIN_SCORE = 30
     MAX_RESOLVER_SCORE = 20
     MAX_HISTORY_SCORE = 10
+
+    # Source trust is passed into the scorer, but deliberately does not
+    # affect the total score yet. It will be enabled by a separate policy
+    # change after this refactoring is verified.
+    MAX_SOURCE_SCORE = 0
+
     MAX_TOTAL_SCORE = 100
 
     def calculate(self, data: RouteScoreInput) -> RouteScore:
@@ -69,11 +78,20 @@ class RouteScorer:
             self.MAX_HISTORY_SCORE,
         )
 
+        # The source trust value is now part of RouteScoreInput and is
+        # available for diagnostics. For this refactoring commit its
+        # contribution intentionally remains zero.
+        source_score = min(
+            data.source_trust,
+            self.MAX_SOURCE_SCORE,
+        )
+
         total = min(
             ip_score
             + domain_score
             + resolver_score
-            + history_score,
+            + history_score
+            + source_score,
             self.MAX_TOTAL_SCORE,
         )
 
@@ -83,6 +101,8 @@ class RouteScorer:
             domain_score=domain_score,
             resolver_score=resolver_score,
             history_score=history_score,
+            source_score=source_score,
+            source_trust=data.source_trust,
         )
 
     @staticmethod
@@ -97,6 +117,9 @@ class RouteScorer:
 
         if data.unique_resolvers < 0:
             raise ValueError("Unique resolver count cannot be negative")
+
+        if not 0 <= data.source_trust <= 100:
+            raise ValueError("Source trust must be between 0 and 100")
 
         if data.last_seen < data.first_seen:
             raise ValueError("last_seen cannot be earlier than first_seen")

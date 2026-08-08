@@ -163,6 +163,15 @@ class RouteStatisticsBuilder:
             if not isinstance(last_seen, datetime):
                 raise RuntimeError("Invalid last_seen aggregation state")
 
+            normalized_sources = {
+                str(source)
+                for source in sources
+            }
+
+            source_trust = self._source_trust_policy.score(
+                normalized_sources
+            )
+
             score = self._scorer.calculate(
                 RouteScoreInput(
                     unique_ips=len(ips),
@@ -170,14 +179,8 @@ class RouteStatisticsBuilder:
                     unique_resolvers=len(resolvers),
                     first_seen=first_seen,
                     last_seen=last_seen,
+                    source_trust=source_trust.total,
                 )
-            )
-
-            source_trust = self._source_trust_policy.score(
-                {
-                    str(source)
-                    for source in sources
-                }
             )
 
             result.append(
