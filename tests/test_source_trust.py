@@ -6,21 +6,16 @@ from __future__ import annotations
 
 import pytest
 
-from routecollector.policy.source_trust import (
-    SourceTrustPolicy,
-)
+from routecollector.policy.source_trust import SourceTrustPolicy
 
 
 def test_source_trust_returns_configured_value() -> None:
-    """Single known source must return its configured trust value."""
-
     policy = SourceTrustPolicy(
         {
             "manual": 100,
             "domain-list-community": 95,
         }
     )
-
     result = policy.score({"manual"})
 
     assert result.total == 100
@@ -29,9 +24,20 @@ def test_source_trust_returns_configured_value() -> None:
     assert result.source_values == {"manual": 100}
 
 
-def test_source_trust_combines_independent_sources() -> None:
-    """Additional independent sources must increase trust."""
+def test_default_policy_includes_dynamic_dns() -> None:
+    policy = SourceTrustPolicy()
 
+    assert policy.get("manual") == 100
+    assert policy.get("domain-list-community") == 95
+    assert policy.get("dynamic-dns") == 50
+
+    result = policy.score({"dynamic-dns"})
+    assert result.total == 50
+    assert result.matched_sources == ("dynamic-dns",)
+    assert result.unknown_sources == ()
+
+
+def test_source_trust_combines_independent_sources() -> None:
     policy = SourceTrustPolicy(
         {
             "manual": 80,
@@ -39,13 +45,8 @@ def test_source_trust_combines_independent_sources() -> None:
             "custom": 40,
         }
     )
-
     result = policy.score(
-        {
-            "manual",
-            "domain-list-community",
-            "custom",
-        }
+        {"manual", "domain-list-community", "custom"}
     )
 
     assert result.total == 100
@@ -57,16 +58,9 @@ def test_source_trust_combines_independent_sources() -> None:
 
 
 def test_source_trust_deduplicates_source_names() -> None:
-    """Duplicate and differently cased names must not be counted twice."""
-
     policy = SourceTrustPolicy({"manual": 80})
-
     result = policy.score(
-        [
-            "manual",
-            "MANUAL",
-            " manual ",
-        ]
+        ["manual", "MANUAL", " manual "]
     )
 
     assert result.total == 80
@@ -74,16 +68,8 @@ def test_source_trust_deduplicates_source_names() -> None:
 
 
 def test_source_trust_tracks_unknown_sources() -> None:
-    """Unknown sources must not add score but must remain visible."""
-
     policy = SourceTrustPolicy({"manual": 80})
-
-    result = policy.score(
-        {
-            "manual",
-            "unknown",
-        }
-    )
+    result = policy.score({"manual", "unknown"})
 
     assert result.total == 80
     assert result.matched_sources == ("manual",)
@@ -91,10 +77,7 @@ def test_source_trust_tracks_unknown_sources() -> None:
 
 
 def test_source_trust_returns_zero_without_known_sources() -> None:
-    """No known source evidence must produce a zero score."""
-
     policy = SourceTrustPolicy({"manual": 80})
-
     result = policy.score({"unknown"})
 
     assert result.total == 0
@@ -103,8 +86,6 @@ def test_source_trust_returns_zero_without_known_sources() -> None:
 
 
 def test_source_trust_get_and_values() -> None:
-    """Configured values must be available without exposing internal state."""
-
     policy = SourceTrustPolicy({"Manual": 90})
 
     assert policy.get("manual") == 90
@@ -117,15 +98,10 @@ def test_source_trust_get_and_values() -> None:
     assert policy.get("manual") == 90
 
 
-@pytest.mark.parametrize(
-    "value",
-    [-1, 101],
-)
+@pytest.mark.parametrize("value", [-1, 101])
 def test_source_trust_rejects_out_of_range_values(
     value: int,
 ) -> None:
-    """Trust values must remain between zero and one hundred."""
-
     with pytest.raises(
         ValueError,
         match="between 0 and 100",
@@ -134,8 +110,6 @@ def test_source_trust_rejects_out_of_range_values(
 
 
 def test_source_trust_rejects_non_integer_value() -> None:
-    """Trust values must be integers."""
-
     with pytest.raises(
         TypeError,
         match="must be an integer",

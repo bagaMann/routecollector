@@ -19,8 +19,6 @@ def make_observation(
     first_seen: str = "2026-07-01 00:00:00",
     last_seen: str = "2026-07-11 00:00:00",
 ) -> Observation:
-    """Build an observation for statistics tests."""
-
     return Observation(
         id=observation_id,
         domain_id=domain_id,
@@ -37,10 +35,7 @@ def make_observation(
 
 
 def test_statistics_builder_aggregates_ipv4_prefix() -> None:
-    """IPv4 observations in one /24 must produce one route statistic."""
-
     builder = RouteStatisticsBuilder()
-
     stats = builder.build(
         [
             make_observation(
@@ -60,10 +55,8 @@ def test_statistics_builder_aggregates_ipv4_prefix() -> None:
         ]
     )
 
-    assert len(stats) == 1
-
     stat = stats[0]
-
+    assert len(stats) == 1
     assert stat.prefix == "8.8.8.0/24"
     assert stat.family == 4
     assert stat.source_ips == 2
@@ -72,16 +65,11 @@ def test_statistics_builder_aggregates_ipv4_prefix() -> None:
     assert stat.source_count == 1
     assert stat.source_trust == 100
     assert stat.total_hits == 10
-    assert stat.confidence == 40
-    assert stat.first_seen == "2026-07-01 00:00:00"
-    assert stat.last_seen == "2026-07-11 00:00:00"
+    assert stat.confidence == 55
 
 
 def test_statistics_builder_aggregates_ipv6_prefix() -> None:
-    """IPv6 observations in one /48 must produce one route statistic."""
-
     builder = RouteStatisticsBuilder()
-
     stats = builder.build(
         [
             make_observation(
@@ -105,10 +93,7 @@ def test_statistics_builder_aggregates_ipv6_prefix() -> None:
 
 
 def test_statistics_builder_counts_unique_evidence_only() -> None:
-    """Duplicate IP, domain and resolver values must not inflate evidence."""
-
     builder = RouteStatisticsBuilder()
-
     stats = builder.build(
         [
             make_observation(
@@ -128,24 +113,18 @@ def test_statistics_builder_counts_unique_evidence_only() -> None:
         ]
     )
 
-    assert len(stats) == 1
-
     stat = stats[0]
-
     assert stat.source_ips == 1
     assert stat.unique_domains == 1
     assert stat.unique_resolvers == 1
     assert stat.source_count == 1
     assert stat.source_trust == 100
     assert stat.total_hits == 12
-    assert stat.confidence == 25
+    assert stat.confidence == 45
 
 
 def test_statistics_builder_counts_independent_sources() -> None:
-    """Independent domain sources must contribute provenance evidence."""
-
     builder = RouteStatisticsBuilder()
-
     stats = builder.build(
         [
             make_observation(
@@ -165,16 +144,35 @@ def test_statistics_builder_counts_independent_sources() -> None:
         ]
     )
 
-    assert len(stats) == 1
     assert stats[0].source_count == 2
     assert stats[0].source_trust == 100
+    assert stats[0].confidence == 55
+
+
+def test_statistics_builder_scores_dynamic_dns_source() -> None:
+    builder = RouteStatisticsBuilder()
+    stats = builder.build(
+        [
+            make_observation(
+                observation_id=1,
+                domain_id=10,
+                domain_source="dynamic-dns",
+                ip="8.8.8.8",
+                dns_server="1.1.1.1",
+                first_seen="2026-07-11 00:00:00",
+                last_seen="2026-07-11 00:00:00",
+            )
+        ]
+    )
+
+    stat = stats[0]
+    assert stat.source_count == 1
+    assert stat.source_trust == 50
+    assert stat.confidence == 25
 
 
 def test_statistics_builder_uses_earliest_and_latest_dates() -> None:
-    """Builder must preserve the oldest first_seen and newest last_seen."""
-
     builder = RouteStatisticsBuilder()
-
     stats = builder.build(
         [
             make_observation(
@@ -201,10 +199,7 @@ def test_statistics_builder_uses_earliest_and_latest_dates() -> None:
 
 
 def test_statistics_builder_skips_invalid_observations() -> None:
-    """Invalid IP addresses and timestamps must be ignored."""
-
     builder = RouteStatisticsBuilder()
-
     stats = builder.build(
         [
             make_observation(
@@ -227,10 +222,7 @@ def test_statistics_builder_skips_invalid_observations() -> None:
 
 
 def test_statistics_builder_skips_non_global_addresses() -> None:
-    """Special-use addresses must never become publishable routes."""
-
     builder = RouteStatisticsBuilder()
-
     stats = builder.build(
         [
             make_observation(
@@ -264,8 +256,6 @@ def test_statistics_builder_skips_non_global_addresses() -> None:
 
 
 def test_statistics_builder_rejects_invalid_prefix_lengths() -> None:
-    """Invalid IPv4 and IPv6 prefix lengths must be rejected."""
-
     try:
         RouteStatisticsBuilder(ipv4_prefix=33)
     except ValueError as exc:

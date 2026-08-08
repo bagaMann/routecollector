@@ -8,20 +8,14 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from routecollector.policy.scoring import (
-    RouteScoreInput,
-    RouteScorer,
-)
+from routecollector.policy.scoring import RouteScoreInput, RouteScorer
 
 
 NOW = datetime(2026, 7, 11, 8, 0, 0)
 
 
 def test_route_scorer_calculates_all_components() -> None:
-    """Score must include IP, domain, resolver and history components."""
-
     scorer = RouteScorer()
-
     result = scorer.calculate(
         RouteScoreInput(
             unique_ips=5,
@@ -29,21 +23,21 @@ def test_route_scorer_calculates_all_components() -> None:
             unique_resolvers=2,
             first_seen=NOW - timedelta(days=7),
             last_seen=NOW,
+            source_trust=50,
         )
     )
 
     assert result.ip_score == 15
     assert result.domain_score == 8
-    assert result.resolver_score == 20
+    assert result.resolver_score == 15
     assert result.history_score == 7
-    assert result.total == 50
+    assert result.source_score == 10
+    assert result.source_trust == 50
+    assert result.total == 55
 
 
-def test_route_scorer_caps_total_at_one_hundred() -> None:
-    """Total confidence must never exceed 100."""
-
+def test_route_scorer_caps_components_and_total() -> None:
     scorer = RouteScorer()
-
     result = scorer.calculate(
         RouteScoreInput(
             unique_ips=100,
@@ -51,32 +45,61 @@ def test_route_scorer_caps_total_at_one_hundred() -> None:
             unique_resolvers=10,
             first_seen=NOW - timedelta(days=100),
             last_seen=NOW,
+            source_trust=100,
         )
     )
 
-    assert result.ip_score == 40
-    assert result.domain_score == 30
-    assert result.resolver_score == 20
+    assert result.ip_score == 30
+    assert result.domain_score == 25
+    assert result.resolver_score == 15
     assert result.history_score == 10
+    assert result.source_score == 20
     assert result.total == 100
 
 
 def test_route_scorer_handles_zero_values() -> None:
-    """Empty evidence must produce a zero score."""
-
-    scorer = RouteScorer()
-
-    result = scorer.calculate(
+    result = RouteScorer().calculate(
         RouteScoreInput(
             unique_ips=0,
             unique_domains=0,
             unique_resolvers=0,
             first_seen=NOW,
             last_seen=NOW,
+            source_trust=0,
+        )
+    )
+    assert result.total == 0
+    assert result.source_score == 0
+
+
+def test_route_scorer_scales_source_trust_to_twenty_points() -> None:
+    scorer = RouteScorer()
+
+    low = scorer.calculate(
+        RouteScoreInput(
+            unique_ips=0,
+            unique_domains=0,
+            unique_resolvers=0,
+            first_seen=NOW,
+            last_seen=NOW,
+            source_trust=50,
+        )
+    )
+    high = scorer.calculate(
+        RouteScoreInput(
+            unique_ips=0,
+            unique_domains=0,
+            unique_resolvers=0,
+            first_seen=NOW,
+            last_seen=NOW,
+            source_trust=100,
         )
     )
 
-    assert result.total == 0
+    assert low.source_score == 10
+    assert low.total == 10
+    assert high.source_score == 20
+    assert high.total == 20
 
 
 @pytest.mark.parametrize(
@@ -92,8 +115,6 @@ def test_route_scorer_rejects_negative_counts(
     value: int,
     message: str,
 ) -> None:
-    """Negative evidence counters must be rejected."""
-
     values = {
         "unique_ips": 1,
         "unique_domains": 1,
@@ -101,35 +122,51 @@ def test_route_scorer_rejects_negative_counts(
     }
     values[field_name] = value
 
-    scorer = RouteScorer()
-
     with pytest.raises(ValueError, match=message):
-        scorer.calculate(
+        RouteScorer().calculate(
             RouteScoreInput(
                 unique_ips=values["unique_ips"],
                 unique_domains=values["unique_domains"],
                 unique_resolvers=values["unique_resolvers"],
                 first_seen=NOW,
                 last_seen=NOW,
+                source_trust=0,
+            )
+        )
+
+
+@pytest.mark.parametrize("source_trust", [-1, 101])
+def test_route_scorer_rejects_invalid_source_trust(
+    source_trust: int,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="Source trust must be between 0 and 100",
+    ):
+        RouteScorer().calculate(
+            RouteScoreInput(
+                unique_ips=1,
+                unique_domains=1,
+                unique_resolvers=1,
+                first_seen=NOW,
+                last_seen=NOW,
+                source_trust=source_trust,
             )
         )
 
 
 def test_route_scorer_rejects_reversed_dates() -> None:
-    """last_seen earlier than first_seen must be rejected."""
-
-    scorer = RouteScorer()
-
     with pytest.raises(
         ValueError,
         match="last_seen cannot be earlier than first_seen",
     ):
-        scorer.calculate(
+        RouteScorer().calculate(
             RouteScoreInput(
                 unique_ips=1,
                 unique_domains=1,
                 unique_resolvers=1,
                 first_seen=NOW,
                 last_seen=NOW - timedelta(days=1),
+                source_trust=0,
             )
         )
