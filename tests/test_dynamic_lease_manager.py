@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from routecollector.dynamic import (
     DynamicLeaseManager,
@@ -32,8 +32,13 @@ class Clock:
 
 
 class FakePublisher:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        on_publish: Callable[[], None] | None = None,
+    ) -> None:
         self.calls: list[tuple[str, ...]] = []
+        self._on_publish = on_publish
 
     def publish(
         self,
@@ -43,6 +48,9 @@ class FakePublisher:
             sorted(required_prefixes)
         )
         self.calls.append(requested)
+
+        if self._on_publish is not None:
+            self._on_publish()
 
         return DynamicPublishResult(
             route_stats_built=10,
@@ -122,3 +130,37 @@ def test_manager_republishes_only_active_leases(
         "172.217.131.0/24"
     )
     assert store.expired_prefixes() == ()
+
+
+def test_manager_preserves_lease_renewed_during_cleanup(
+    tmp_path: Path,
+) -> None:
+    clock = Clock()
+    prefix = "85.249.244.0/24"
+    store = DynamicRouteLeaseStore(
+        tmp_path / "leases.json",
+        lease_seconds=30,
+        now=clock.now,
+    )
+    store.renew([prefix])
+
+    clock.value += timedelta(seconds=30)
+
+    cache = DynamicRouteCache([prefix])
+    publisher = FakePublisher(
+        on_publish=lambda: store.renew([prefix])
+    )
+
+    manager = DynamicLeaseManager(
+        store=store,
+        publisher=publisher,
+        route_cache=cache,
+    )
+
+    result = manager.reconcile_once()
+
+    assert result is not None
+    assert publisher.calls == [()]
+    assert store.active_prefixes() == (prefix,)
+    assert store.expired_prefixes() == ()
+    assert cache.contains(prefix)
