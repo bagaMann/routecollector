@@ -63,6 +63,21 @@ class FakePublisher:
         )
 
 
+class FakeLeaseStore:
+    def __init__(self) -> None:
+        self.renewed: list[tuple[str, ...]] = []
+
+    def renew(
+        self,
+        prefixes: Iterable[str],
+    ) -> object:
+        renewed = tuple(
+            sorted(prefixes)
+        )
+        self.renewed.append(renewed)
+        return renewed
+
+
 def test_known_prefix_returns_without_publish() -> None:
     publisher = FakePublisher()
     cache = DynamicRouteCache(
@@ -84,6 +99,33 @@ def test_known_prefix_returns_without_publish() -> None:
     assert result.published is False
     assert result.publish_result is None
     assert publisher.calls == 0
+
+
+def test_known_prefix_renews_lease_without_publish() -> None:
+    publisher = FakePublisher()
+    lease_store = FakeLeaseStore()
+    cache = DynamicRouteCache(
+        ["142.250.74.0/24"]
+    )
+    queue = DynamicPublishQueue(
+        publisher=publisher,
+        route_cache=cache,
+        lease_store=lease_store,
+        debounce_seconds=0.01,
+    )
+
+    try:
+        result = queue.submit(
+            ["142.250.74.238/24"]
+        )
+    finally:
+        queue.stop()
+
+    assert result.published is False
+    assert publisher.calls == 0
+    assert lease_store.renewed == [
+        ("142.250.74.0/24",)
+    ]
 
 
 def test_missing_prefix_is_published_and_cached() -> None:
@@ -108,6 +150,31 @@ def test_missing_prefix_is_published_and_cached() -> None:
     assert result.published is True
     assert second.published is False
     assert publisher.calls == 1
+
+
+def test_missing_prefix_renews_lease_after_publish() -> None:
+    publisher = FakePublisher()
+    lease_store = FakeLeaseStore()
+    cache = DynamicRouteCache()
+    queue = DynamicPublishQueue(
+        publisher=publisher,
+        route_cache=cache,
+        lease_store=lease_store,
+        debounce_seconds=0.01,
+    )
+
+    try:
+        result = queue.submit(
+            ["142.250.74.238/24"]
+        )
+    finally:
+        queue.stop()
+
+    assert result.published is True
+    assert publisher.calls == 1
+    assert lease_store.renewed == [
+        ("142.250.74.0/24",)
+    ]
 
 
 def test_rejected_prefix_is_not_cached() -> None:
