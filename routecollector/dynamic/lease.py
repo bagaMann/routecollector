@@ -199,6 +199,46 @@ class DynamicRouteLeaseStore:
 
         return removed
 
+    def remove_expired(
+        self,
+        prefixes: Iterable[str],
+    ) -> tuple[str, ...]:
+        """Remove only candidate leases that are still expired.
+
+        A lease may be renewed by a DNS request while cleanup is publishing
+        the reduced route plan. Rechecking expiry under the store lock avoids
+        deleting that freshly renewed lease.
+        """
+
+        normalized = {
+            self._normalize_prefix(prefix)
+            for prefix in prefixes
+        }
+
+        if not normalized:
+            return ()
+
+        now = self._now()
+
+        with self._lock:
+            data = self._load_unlocked()
+            removed: list[str] = []
+
+            for prefix in sorted(normalized):
+                value = data.get(prefix)
+
+                if value is None:
+                    continue
+
+                if self._parse_expiry(prefix, value) <= now:
+                    data.pop(prefix, None)
+                    removed.append(prefix)
+
+            if removed:
+                self._save_unlocked(data)
+
+        return tuple(removed)
+
     def _load_unlocked(self) -> dict[str, str]:
         if not self._path.exists():
             return {}
@@ -379,13 +419,24 @@ class DynamicLeaseManager:
             active
         )
 
-        self._store.remove(expired)
-        self._store.remove(
-            result.dynamic_rejected_prefixes
+        # Remove candidates from the cache before the final expiry check.
+        # If DNS renews one concurrently, remove_expired() will preserve its
+        # lease and the prefix is added back to the cache below.
+        self._route_cache.discard(expired)
+
+        removed_expired = set(
+            self._store.remove_expired(expired)
+        )
+        renewed_during_cleanup = (
+            set(expired) - removed_expired
         )
 
-        self._route_cache.discard(
-            expired
+        self._route_cache.add(
+            renewed_during_cleanup
+        )
+
+        self._store.remove(
+            result.dynamic_rejected_prefixes
         )
         self._route_cache.discard(
             result.dynamic_rejected_prefixes
