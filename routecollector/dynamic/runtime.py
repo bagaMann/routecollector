@@ -4,7 +4,8 @@ Assemble and run the dynamic RouteCollector DNS pipeline.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import os
 from pathlib import Path
 import signal
 from threading import Event
@@ -31,6 +32,38 @@ from routecollector.dynamic.route_cache import DynamicRouteCache
 from routecollector.planner.planner import RoutePlanner
 
 
+def _env_int(name: str, default: int) -> int:
+    """Read an integer environment override."""
+
+    value = os.getenv(name)
+
+    if value is None:
+        return default
+
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"{name} must be an integer"
+        ) from exc
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a floating-point environment override."""
+
+    value = os.getenv(name)
+
+    if value is None:
+        return default
+
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"{name} must be a number"
+        ) from exc
+
+
 @dataclass(slots=True, frozen=True)
 class DynamicRuntimeConfig:
     dns_proxy: DnsProxyConfig
@@ -49,8 +82,18 @@ class DynamicRuntimeConfig:
     dynamic_min_confidence_ipv4: int = 25
     dynamic_min_confidence_ipv6: int = 25
     dynamic_min_source_trust: int = 50
-    dynamic_lease_seconds: int = 86400
-    dynamic_lease_check_seconds: float = 60.0
+    dynamic_lease_seconds: int = field(
+        default_factory=lambda: _env_int(
+            "ROUTECOLLECTOR_DYNAMIC_LEASE_SECONDS",
+            86400,
+        )
+    )
+    dynamic_lease_check_seconds: float = field(
+        default_factory=lambda: _env_float(
+            "ROUTECOLLECTOR_DYNAMIC_LEASE_CHECK_SECONDS",
+            60.0,
+        )
+    )
     max_age_days: int = 30
     enable_ipv6: bool = False
     global_only: bool = True
@@ -78,9 +121,9 @@ class DynamicRuntimeConfig:
             ),
         ):
             if not 0 <= value <= 100:
-                 raise ValueError(
+                raise ValueError(
                     f"{name} must be between 0 and 100"
-                 )
+                )
 
         if self.dynamic_lease_seconds <= 0:
             raise ValueError(
