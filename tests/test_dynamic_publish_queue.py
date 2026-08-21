@@ -5,7 +5,8 @@ Tests for debounced dynamic route publication.
 from __future__ import annotations
 
 from pathlib import Path
-from threading import Barrier, Thread
+from threading import Barrier, Event, Thread
+from time import sleep
 from typing import Iterable
 
 from routecollector.dynamic import (
@@ -61,6 +62,26 @@ class FakePublisher:
                 else requested
             ),
         )
+
+
+class BlockingPublisher(FakePublisher):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = Event()
+        self.release = Event()
+
+    def publish(
+        self,
+        required_prefixes: Iterable[str] = (),
+    ) -> DynamicPublishResult:
+        self.started.set()
+
+        if not self.release.wait(2.0):
+            raise RuntimeError(
+                "Timed out waiting to release test publisher"
+            )
+
+        return super().publish(required_prefixes)
 
 
 class FakeLeaseStore:
@@ -252,3 +273,54 @@ def test_concurrent_requests_share_one_publish() -> None:
     assert cache.contains(
         "173.194.221.0/24"
     )
+
+
+def test_request_arriving_during_publish_is_not_published_twice() -> None:
+    publisher = BlockingPublisher()
+    lease_store = FakeLeaseStore()
+    cache = DynamicRouteCache()
+    queue = DynamicPublishQueue(
+        publisher=publisher,
+        route_cache=cache,
+        lease_store=lease_store,
+        debounce_seconds=0.01,
+        wait_timeout_seconds=2.0,
+    )
+    results: list[object] = []
+
+    first = Thread(
+        target=lambda: results.append(
+            queue.submit(["142.250.74.0/24"])
+        )
+    )
+    first.start()
+
+    assert publisher.started.wait(1.0)
+
+    second = Thread(
+        target=lambda: results.append(
+            queue.submit(["142.250.74.0/24"])
+        )
+    )
+    second.start()
+
+    sleep(0.05)
+    publisher.release.set()
+
+    first.join()
+    second.join()
+    queue.stop()
+
+    assert publisher.calls == 1
+    assert len(results) == 2
+    assert cache.contains(
+        "142.250.74.0/24"
+    )
+    assert sorted(
+        result.published
+        for result in results
+    ) == [False, True]
+    assert lease_store.renewed == [
+        ("142.250.74.0/24",),
+        ("142.250.74.0/24",),
+    ]
