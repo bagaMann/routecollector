@@ -103,6 +103,8 @@ class DynamicPublishQueue:
         )
 
         if not missing:
+            self._renew_leases(requested)
+
             return DynamicQueueResult(
                 requested_prefixes=requested,
                 missing_prefixes=(),
@@ -210,11 +212,9 @@ class DynamicPublishQueue:
                 self._route_cache.add(
                     result.dynamic_published_prefixes
                 )
-
-                if self._lease_store is not None:
-                    self._lease_store.renew(
-                        result.dynamic_published_prefixes
-                    )
+                self._renew_leases(
+                    result.dynamic_published_prefixes
+                )
 
                 for waiter in batch_waiters:
                     waiter.result = result
@@ -224,6 +224,18 @@ class DynamicPublishQueue:
                 for waiter in batch_waiters:
                     waiter.error = exc
                     waiter.event.set()
+
+    def _renew_leases(
+        self,
+        prefixes: Iterable[str | IPNetwork],
+    ) -> None:
+        if self._lease_store is None:
+            return
+
+        self._lease_store.renew(
+            str(prefix)
+            for prefix in prefixes
+        )
 
     @staticmethod
     def _normalize(
