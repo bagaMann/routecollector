@@ -83,6 +83,7 @@ class DynamicPublishQueue:
 
         self._condition = Condition()
         self._pending: set[IPNetwork] = set()
+        self._inflight: set[IPNetwork] = set()
         self._waiters: list[_Waiter] = []
         self._stopping = False
 
@@ -98,39 +99,58 @@ class DynamicPublishQueue:
         prefixes: Iterable[str | IPNetwork],
     ) -> DynamicQueueResult:
         requested = self._normalize(prefixes)
-        missing = self._route_cache.missing(
-            requested
-        )
+        deadline = monotonic() + self._wait_timeout_seconds
 
-        if not missing:
-            self._renew_leases(requested)
+        while True:
+            with self._condition:
+                if self._stopping:
+                    raise DynamicPublishQueueError(
+                        "Dynamic publish queue is stopping"
+                    )
 
-            return DynamicQueueResult(
-                requested_prefixes=requested,
-                missing_prefixes=(),
-                published=False,
-                publish_result=None,
-            )
-
-        waiter = _Waiter(
-            requested=requested,
-            missing=missing,
-            event=Event(),
-        )
-
-        with self._condition:
-            if self._stopping:
-                raise DynamicPublishQueueError(
-                    "Dynamic publish queue is stopping"
+                missing = self._route_cache.missing(
+                    requested
                 )
 
-            self._pending.update(missing)
-            self._waiters.append(waiter)
-            self._condition.notify()
+                if not missing:
+                    self._renew_leases(requested)
 
-        if not waiter.event.wait(
-            self._wait_timeout_seconds
-        ):
+                    return DynamicQueueResult(
+                        requested_prefixes=requested,
+                        missing_prefixes=(),
+                        published=False,
+                        publish_result=None,
+                    )
+
+                if any(
+                    prefix in self._inflight
+                    for prefix in missing
+                ):
+                    remaining = deadline - monotonic()
+
+                    if remaining <= 0:
+                        raise DynamicPublishQueueError(
+                            "Timed out waiting for in-flight "
+                            "dynamic route publication"
+                        )
+
+                    self._condition.wait(remaining)
+                    continue
+
+                waiter = _Waiter(
+                    requested=requested,
+                    missing=missing,
+                    event=Event(),
+                )
+
+                self._pending.update(missing)
+                self._waiters.append(waiter)
+                self._condition.notify()
+                break
+
+        remaining = deadline - monotonic()
+
+        if remaining <= 0 or not waiter.event.wait(remaining):
             raise DynamicPublishQueueError(
                 "Timed out waiting for dynamic route publication"
             )
@@ -202,6 +222,7 @@ class DynamicPublishQueue:
                 batch_waiters = self._waiters
                 self._pending = set()
                 self._waiters = []
+                self._inflight = set(batch_prefixes)
 
             try:
                 result = self._publisher.publish(
@@ -224,6 +245,11 @@ class DynamicPublishQueue:
                 for waiter in batch_waiters:
                     waiter.error = exc
                     waiter.event.set()
+
+            finally:
+                with self._condition:
+                    self._inflight.clear()
+                    self._condition.notify_all()
 
     def _renew_leases(
         self,
