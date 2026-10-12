@@ -1,0 +1,24 @@
+[Unit]
+Description=RouteCollector Dynamic DNS Proxy
+Documentation=https://github.com/bagaMann/routecollector
+Wants=network-online.target
+After=network-online.target bird.service
+Requires=bird.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/routecollector
+Environment=PYTHONUNBUFFERED=1
+Environment=ROUTECOLLECTOR_DYNAMIC_LEASE_SECONDS=300
+Environment=ROUTECOLLECTOR_DYNAMIC_LEASE_CHECK_SECONDS=2
+EnvironmentFile=-/etc/default/routecollector-dns-proxy
+ExecStart=/opt/routecollector/.venv/bin/routecollector dns-proxy --listen 0.0.0.0 --port 5353 --upstream 1.1.1.1
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
