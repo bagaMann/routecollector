@@ -1179,7 +1179,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.min_confidence_ipv6,
             args.max_age_days,
             args.enable_ipv6,
-            args.dry_run,
         )
 
     if args.command == "stats":
